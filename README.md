@@ -81,7 +81,7 @@ docker compose down -v
 
 ### 설정 불러오기
 
-런타임에서 사용할 설정은 `loadApplicationConfig(config)`로 불러옵니다.
+런타임에서 사용할 설정은 `loadApplicationConfig(config)`로 불러옵니다. 기본값은 `resources/application.yml`이며, 다른 경로를 쓰려면 `loadApplicationConfig(config, directory, file)` 형태로 넘깁니다.
 
 ```cpp
 #include "ApplicationConfigLoader.h"
@@ -107,17 +107,6 @@ int main(int argc, char const* argv[]) {
 }
 ```
 
-`AppRuntimeConfigLoader`를 사용하는 코드도 같은 설정 로더를 사용합니다.
-
-```cpp
-#include "AppRuntimeConfigLoader.h"
-
-AppRuntimeConfig config;
-if (!AppRuntimeConfigLoader().load(config)) {
-    return 1;
-}
-```
-
 ### 설정 추가 가이드
 
 `application.yml`에 설정을 추가할 때는 `src/ApplicationConfigLoader.cpp`의 `bindings()` 테이블에 매핑을 추가합니다.
@@ -134,10 +123,10 @@ if (!AppRuntimeConfigLoader().load(config)) {
 - 네 번째 값: `std::string` 타입의 `AppRuntimeConfig` 필드
 - 다섯 번째 값: `int` 타입의 `AppRuntimeConfig` 필드
 
-새 설정을 코드에서 직접 쓰려면 먼저 `include/AppRuntimeConfigLoader.h`의 `AppRuntimeConfig`에 필드를 추가하고, `bindings()`에서 해당 필드에 연결합니다.
+새 설정을 코드에서 직접 쓰려면 먼저 `include/ApplicationConfigLoader.h`의 `AppRuntimeConfig`에 필드를 추가하고, `bindings()`에서 해당 필드에 연결합니다.
 
 ```cpp
-// include/AppRuntimeConfigLoader.h
+// include/ApplicationConfigLoader.h
 struct AppRuntimeConfig {
     int requestTimeoutMs = 3000;
 };
@@ -150,7 +139,7 @@ struct AppRuntimeConfig {
 문자열 설정은 네 번째 필드에 연결합니다.
 
 ```cpp
-// include/AppRuntimeConfigLoader.h
+// include/ApplicationConfigLoader.h
 struct AppRuntimeConfig {
     std::string serviceName = "vms-server";
 };

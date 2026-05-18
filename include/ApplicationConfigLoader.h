@@ -3,7 +3,18 @@
 
 #include <string>
 
-#include "AppRuntimeConfigLoader.h"
+struct AppRuntimeConfig {
+    std::string dbConninfo;
+    std::string dbMapperPath = "resources/db";
+
+    std::string serverHost = "0.0.0.0";
+    int serverPort = 8080;
+    int serverThreads = 8;
+    int clientPoolThreads = 8;
+    int clientPoolMaxQueue = 500;
+    int onvifDiscoveryIntervalMs = 300000;
+    int mediaMtxPlaybackSyncIntervalMs = 30000;
+};
 
 bool loadApplicationConfig(
     AppRuntimeConfig& config,
