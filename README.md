@@ -72,3 +72,98 @@ docker compose down -v
 - USER: vms_user
 - PASSWORD: veda1234
 - DATABASE: vms_db
+
+## 애플리케이션 설정
+
+애플리케이션 설정 파일은 `resources/application.yml`입니다.
+
+설정은 `ApplicationConfigLoader`에서 한 번 읽고, 필요한 값은 `AppRuntimeConfig`로 바로 사용합니다. 설정 로더는 환경변수를 거치지 않고 `application.yml` 값을 `AppRuntimeConfig`에 직접 바인딩합니다.
+
+### 설정 불러오기
+
+런타임에서 사용할 설정은 `loadApplicationConfig(config)`로 불러옵니다.
+
+```cpp
+#include "ApplicationConfigLoader.h"
+#include "DbRuntime.hpp"
+
+int main(int argc, char const* argv[]) {
+    AppRuntimeConfig config;
+    if (!loadApplicationConfig(config)) {
+        return 1;
+    }
+
+    const std::string& db_conninfo = config.dbConninfo;
+    const std::string& db_mapper_path = config.dbMapperPath;
+    const std::string& host = config.serverHost;
+    const int port = config.serverPort;
+    const int server_threads = config.serverThreads;
+    const int client_pool_threads = config.clientPoolThreads;
+    const int client_pool_max_queue = config.clientPoolMaxQueue;
+
+    AppDb::configure(config.dbConninfo, config.dbMapperPath);
+
+    return 0;
+}
+```
+
+`AppRuntimeConfigLoader`를 사용하는 코드도 같은 설정 로더를 사용합니다.
+
+```cpp
+#include "AppRuntimeConfigLoader.h"
+
+AppRuntimeConfig config;
+if (!AppRuntimeConfigLoader().load(config)) {
+    return 1;
+}
+```
+
+### 설정 추가 가이드
+
+`application.yml`에 설정을 추가할 때는 `src/ApplicationConfigLoader.cpp`의 `bindings()` 테이블에 매핑을 추가합니다.
+
+매핑 한 줄에는 다음 정보가 함께 들어갑니다.
+
+```cpp
+{"app.http.server.port", false, "8080", nullptr, &AppRuntimeConfig::serverPort},
+```
+
+- 첫 번째 값: `application.yml`의 경로
+- 두 번째 값: 필수 여부
+- 세 번째 값: 설정이 없을 때 사용할 기본값
+- 네 번째 값: `std::string` 타입의 `AppRuntimeConfig` 필드
+- 다섯 번째 값: `int` 타입의 `AppRuntimeConfig` 필드
+
+새 설정을 코드에서 직접 쓰려면 먼저 `include/AppRuntimeConfigLoader.h`의 `AppRuntimeConfig`에 필드를 추가하고, `bindings()`에서 해당 필드에 연결합니다.
+
+```cpp
+// include/AppRuntimeConfigLoader.h
+struct AppRuntimeConfig {
+    int requestTimeoutMs = 3000;
+};
+
+// src/ApplicationConfigLoader.cpp
+{"app.http.requestTimeoutMs", false, "3000",
+    nullptr, &AppRuntimeConfig::requestTimeoutMs},
+```
+
+문자열 설정은 네 번째 필드에 연결합니다.
+
+```cpp
+// include/AppRuntimeConfigLoader.h
+struct AppRuntimeConfig {
+    std::string serviceName = "vms-server";
+};
+
+// src/ApplicationConfigLoader.cpp
+{"app.service.name", false, "vms-server",
+    &AppRuntimeConfig::serviceName, nullptr},
+```
+
+필수 설정은 기본값을 `std::nullopt`로 두고 두 번째 값을 `true`로 둡니다. 설정 파일에 값이 없으면 로딩에 실패합니다.
+
+```cpp
+{"app.auth.secret", true, std::nullopt, &AppRuntimeConfig::authSecret, nullptr},
+```
+
+선택 설정은 두 번째 값을 `false`로 둡니다. 기본값이 있으면 세 번째 값에 넣고, 기본값 없이 생략 가능하면 `std::nullopt`를 사용합니다.

@@ -7,6 +7,7 @@
 
 namespace AppDb {
 
+void configure(const std::string& conninfo, const std::string& mapper_path);
 DbTemplate* instance();
 
 bool insert(const std::string& statement, const DbTemplate::ParamMap& params);

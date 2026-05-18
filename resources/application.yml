@@ -1,6 +1,6 @@
 app:
   db:
-    conninfo: "postgresql://veda:veda1234@localhost:5432/vms"
+    conninfo: "postgresql://vms_user:veda1234@localhost:5432/vms_db"
     mapperPath: "resources/db"
 
   http:
@@ -12,38 +12,38 @@ app:
       threads: 8
       maxQueue: 500
 
-  onvif:
-    offlineStaleSeconds: 400
+  # onvif:
+  #   offlineStaleSeconds: 400
 
-    discovery:
-      multicastIp: "239.255.255.250"
-      multicastPort: 3702
-      recvTimeoutMs: 10000
-      intervalMs: 300000
-      interfaceIp: ""
-      probeRetryCount: 3
-      probeRetryIntervalMs: 300
-      # DHCP 환경에서 카메라 IP가 유동적으로 변할 수 있으므로 기본값은 비워둡니다.
-      # 고정 IP 설정 후 특정 카메라만 타겟팅이 필요할 때 해당 IP를 기입하세요. (예: "192.168.0.22")
-      unicastTargets: ""
+  #   discovery:
+  #     multicastIp: "239.255.255.250"
+  #     multicastPort: 3702
+  #     recvTimeoutMs: 10000
+  #     intervalMs: 300000
+  #     interfaceIp: ""
+  #     probeRetryCount: 3
+  #     probeRetryIntervalMs: 300
+  #     # DHCP 환경에서 카메라 IP가 유동적으로 변할 수 있으므로 기본값은 비워둡니다.
+  #     # 고정 IP 설정 후 특정 카메라만 타겟팅이 필요할 때 해당 IP를 기입하세요. (예: "192.168.0.22")
+  #     unicastTargets: ""
 
-    defaults:
-      deviceServicePath: "/onvif/device_service"
-      mediaServicePath: "/onvif/media_service"
-      eventServicePath: "/onvif/event_service"
+  #   defaults:
+  #     deviceServicePath: "/onvif/device_service"
+  #     mediaServicePath: "/onvif/media_service"
+  #     eventServicePath: "/onvif/event_service"
 
-    pullMessages:
-      maxPollCount: 0
+  #   pullMessages:
+  #     maxPollCount: 0
 
-  cctv:
-    id: "admin"
-    pw: "5hanwha!"
+  # cctv:
+  #   id: "admin"
+  #   pw: "5hanwha!"
 
-  mediamtx:
-    apiHost: "127.0.0.1"
-    apiPort: 9997
-    playbackHost: "127.0.0.1"
-    playbackPort: 9996
-    playbackSyncIntervalMs: 30000
-    rtspHost: "127.0.0.1"
-    rtspPort: 8554
+  # mediamtx:
+  #   apiHost: "127.0.0.1"
+  #   apiPort: 9997
+  #   playbackHost: "127.0.0.1"
+  #   playbackPort: 9996
+  #   playbackSyncIntervalMs: 30000
+  #   rtspHost: "127.0.0.1"
+  #   rtspPort: 8554

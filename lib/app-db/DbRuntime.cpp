@@ -4,10 +4,8 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <utility>
 
-#include "EnvManager.h"
 
 namespace AppDb {
 namespace {
@@ -31,6 +29,22 @@ std::mutex& db_log_mutex() {
     return m;
 }
 
+struct DbSettings {
+    std::string conninfo;
+    std::string mapperPath;
+    bool configured = false;
+};
+
+DbSettings& db_settings() {
+    static DbSettings settings;
+    return settings;
+}
+
+std::mutex& db_settings_mutex() {
+    static std::mutex m;
+    return m;
+}
+
 template <typename... Args>
 void log_info(Args&&... args) {
     std::lock_guard<std::mutex> lock(db_log_mutex());
@@ -45,17 +59,30 @@ void log_error(Args&&... args) {
 
 } // namespace
 
+void configure(const std::string& conninfo, const std::string& mapper_path) {
+    std::lock_guard<std::mutex> lock(db_settings_mutex());
+    DbSettings& settings = db_settings();
+    settings.conninfo = conninfo;
+    settings.mapperPath = mapper_path;
+    settings.configured = true;
+}
+
 DbTemplate* instance() {
     static std::unique_ptr<DbTemplate> db = []() -> std::unique_ptr<DbTemplate> {
-        const auto conninfo = readEnvStringStrict("APP_DB_CONNINFO");
-        const auto mapper_raw = readEnvStringStrict("APP_DB_MAPPER_PATH");
-        if (!conninfo || !mapper_raw) {
-            log_error("[DB] disabled: missing APP_DB_CONNINFO or APP_DB_MAPPER_PATH.");
+        DbSettings settings;
+        {
+            std::lock_guard<std::mutex> lock(db_settings_mutex());
+            settings = db_settings();
+        }
+
+        if (!settings.configured || settings.conninfo.empty() || settings.mapperPath.empty()) {
+            log_error("[DB] disabled: database config is not configured.");
             return nullptr;
         }
-        const std::string mapper_path = resolve_mapper_path(*mapper_raw);
+
+        const std::string mapper_path = resolve_mapper_path(settings.mapperPath);
         try {
-            auto created = std::make_unique<DbTemplate>(*conninfo, mapper_path);
+            auto created = std::make_unique<DbTemplate>(settings.conninfo, mapper_path);
             log_info("[DB] initialized. mapper_path=", mapper_path);
             return created;
         } catch (const std::exception& e) {
