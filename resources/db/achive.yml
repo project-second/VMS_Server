@@ -1,0 +1,129 @@
+mapper:
+  namespace: achive
+  objects:
+    - id: createArchiveSegmentFromPlayback
+      sequence: insert
+      query: >
+        INSERT INTO archive_segment (
+          channel_id,
+          start_ts,
+          end_ts,
+          file_size,
+          codec,
+          has_gap
+        ) VALUES (
+          #{channel_id},
+          #{start_ts},
+          (#{start_ts}::timestamptz + (#{duration_seconds}::double precision * interval '1 second')),
+          #{file_size},
+          #{codec},
+          #{has_gap}
+        )
+
+    - id: getArchiveSegmentByChannelAndStart
+      sequence: select
+      query: >
+        SELECT
+          seg_id,
+          channel_id,
+          start_ts,
+          end_ts
+        FROM archive_segment
+        WHERE channel_id = #{channel_id}
+          AND start_ts = #{start_ts}
+        LIMIT 1
+
+    - id: updateArchiveSegmentBySegIdFromPlayback
+      sequence: update
+      query: >
+        UPDATE archive_segment
+        SET
+          start_ts = #{start_ts},
+          end_ts = (#{start_ts}::timestamptz + (#{duration_seconds}::double precision * interval '1 second')),
+          file_size = #{file_size},
+          codec = #{codec},
+          has_gap = #{has_gap}
+        WHERE seg_id = #{seg_id}
+
+    - id: deleteMissingArchiveSegmentsByChannel
+      sequence: delete
+      query: >
+        DELETE FROM archive_segment s
+        WHERE s.channel_id = #{channel_id}
+          AND NOT EXISTS (
+            SELECT 1
+            FROM jsonb_array_elements_text(#{start_ts_list_json}::jsonb) AS current_start(start_ts)
+            WHERE s.start_ts = current_start.start_ts::timestamptz
+          )
+
+    - id: deleteArchiveSegmentsMissingChannels
+      sequence: delete
+      query: >
+        DELETE FROM archive_segment s
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM jsonb_array_elements_text(#{channel_id_list_json}::jsonb) AS current_channel(channel_id)
+          WHERE s.channel_id = current_channel.channel_id::bigint
+        )
+
+    - id: listArchiveChannelsByDate
+      sequence: select
+      query: >
+        SELECT
+          c.channel_id,
+          c.name
+        FROM channels c
+        WHERE EXISTS (
+          SELECT 1
+          FROM archive_segment s
+          WHERE s.channel_id = c.channel_id
+            AND s.start_ts < (#{target_date}::date + interval '1 day')
+            AND s.end_ts > #{target_date}::date
+        )
+        ORDER BY c.channel_id ASC
+
+    - id: listArchiveSegmentSecondsByChannelAndDate
+      sequence: select
+      query: >
+        SELECT
+          GREATEST(
+            0,
+            EXTRACT(EPOCH FROM (
+              GREATEST(s.start_ts, #{target_date}::date::timestamptz)
+              - #{target_date}::date::timestamptz
+            ))
+          ) AS start_sec,
+          LEAST(
+            86400,
+            EXTRACT(EPOCH FROM (
+              LEAST(s.end_ts, (#{target_date}::date + interval '1 day')::timestamptz)
+              - #{target_date}::date::timestamptz
+            ))
+          ) AS end_sec
+        FROM archive_segment s
+        WHERE s.channel_id = #{channel_id}
+          AND s.start_ts < (#{target_date}::date + interval '1 day')::timestamptz
+          AND s.end_ts > #{target_date}::date::timestamptz
+        ORDER BY start_sec ASC
+
+    - id: getArchiveSegmentForPlayback
+      sequence: select
+      query: >
+        SELECT
+          s.seg_id,
+          s.channel_id,
+          s.start_ts,
+          s.end_ts,
+          to_char(s.start_ts, 'YYYY-MM-DD"T"HH24:MI:SS.US') || to_char(s.start_ts, 'TZH:TZM') AS start_rfc3339,
+          to_char(s.end_ts, 'YYYY-MM-DD"T"HH24:MI:SS.US') || to_char(s.end_ts, 'TZH:TZM') AS end_rfc3339
+        FROM archive_segment s
+        WHERE s.channel_id = #{channel_id}
+        ORDER BY CASE
+          WHEN #{target_ts}::timestamptz < s.start_ts
+            THEN EXTRACT(EPOCH FROM (s.start_ts - #{target_ts}::timestamptz))
+          WHEN #{target_ts}::timestamptz >= s.end_ts
+            THEN EXTRACT(EPOCH FROM (#{target_ts}::timestamptz - s.end_ts))
+          ELSE 0
+        END ASC,
+        s.start_ts ASC
+        LIMIT 1

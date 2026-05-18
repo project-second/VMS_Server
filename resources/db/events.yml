@@ -1,0 +1,106 @@
+mapper:
+  namespace: events
+  objects:
+    - id: createEvent
+      sequence: insert
+      query: >
+        INSERT INTO events (
+          ts,
+          channel_id,
+          event_type,
+          summary
+        ) VALUES (
+          now(),
+          #{channel_id},
+          #{event_type},
+          #{summary}
+        )
+
+    - id: listEvents
+      sequence: select
+      query: >
+        SELECT
+          event_id,
+          ts,
+          channel_id,
+          event_type,
+          summary
+        FROM events
+        ORDER BY ts DESC
+
+    - id: listEventsAfterIdUntilIdWithDevice
+      sequence: select
+      query: >
+        SELECT
+          e.event_id,
+          e.ts,
+          e.channel_id,
+          c.device_id,
+          e.event_type,
+          e.summary
+        FROM events e
+        JOIN channels c
+          ON c.channel_id = e.channel_id
+        WHERE e.event_id > #{after_event_id}
+          AND e.event_id <= #{until_event_id}
+        ORDER BY e.event_id ASC
+        LIMIT #{limit}
+
+    - id: getLatestEventId
+      sequence: select
+      query: >
+        SELECT
+          COALESCE(MAX(event_id), 0) AS latest_event_id
+        FROM events
+
+    - id: getLatestEventByChannelWithDevice
+      sequence: select
+      query: >
+        SELECT
+          e.event_id,
+          e.ts,
+          e.channel_id,
+          c.device_id,
+          e.event_type,
+          e.summary
+        FROM events e
+        JOIN channels c
+          ON c.channel_id = e.channel_id
+        WHERE e.channel_id = #{channel_id}
+        ORDER BY e.event_id DESC
+        LIMIT 1
+
+    - id: listEventMarkersByChannelAndDate
+      sequence: select
+      query: >
+        SELECT
+          event_id,
+          event_type,
+          EXTRACT(EPOCH FROM (ts - #{target_date}::date::timestamptz)) AS ts_sec
+        FROM events
+        WHERE channel_id = #{channel_id}
+          AND ts >= #{target_date}::date::timestamptz
+          AND ts < (#{target_date}::date + interval '1 day')::timestamptz
+        ORDER BY ts ASC
+
+    - id: getEventDetailById
+      sequence: select
+      query: >
+        SELECT
+          e.event_id,
+          e.ts,
+          e.channel_id,
+          e.event_type,
+          e.summary,
+          COALESCE(bs.bestshot_id, 0) AS bestshot_id
+        FROM events e
+        LEFT JOIN LATERAL (
+          SELECT
+            bestshot_id
+          FROM best_shots
+          WHERE event_id = e.event_id
+          ORDER BY ts DESC, bestshot_id DESC
+          LIMIT 1
+        ) bs ON true
+        WHERE e.event_id = #{event_id}
+

@@ -1,0 +1,75 @@
+mapper:
+  namespace: channels
+  objects:
+    - id: upsertChannelByDeviceChannelNo
+      sequence: update
+      query: >
+        INSERT INTO channels (
+          device_id,
+          channel_no,
+          name,
+          enabled,
+          use_profile
+        ) VALUES (
+          #{device_id},
+          #{channel_no},
+          #{name},
+          #{enabled},
+          #{use_profile}
+        )
+        ON CONFLICT (device_id, channel_no)
+        DO UPDATE
+        SET
+            use_profile = EXCLUDED.use_profile,
+            enabled = EXCLUDED.enabled
+
+    - id: listChannelsByDeviceId
+      sequence: select
+      query: >
+        SELECT
+          channel_id,
+          device_id,
+          channel_no,
+          name,
+          enabled,
+          use_profile,
+          service_rtsp_url
+        FROM channels
+        WHERE device_id = #{device_id}
+        ORDER BY channel_no ASC
+
+    - id: updateServiceRtspUrl
+      sequence: update
+      query: >
+        UPDATE channels
+          SET service_rtsp_url = #{service_rtsp_url}
+          WHERE channel_id = #{channel_id}
+
+    - id: selectChannel
+      sequence: select
+      query: >
+        SELECT
+          channel_id,
+          device_id,
+          channel_no,
+          name,
+          enabled,
+          use_profile,
+          service_rtsp_url
+        FROM channels
+        WHERE channel_id = #{channel_id}
+
+    - id: selectChannelByDeviceChannelNo
+      sequence: select
+      query: >
+        SELECT
+          channel_id,
+          device_id,
+          channel_no,
+          name,
+          enabled,
+          use_profile,
+          service_rtsp_url
+        FROM channels
+        WHERE device_id = #{device_id}
+          AND channel_no = #{channel_no}

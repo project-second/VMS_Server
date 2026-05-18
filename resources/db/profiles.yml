@@ -1,0 +1,44 @@
+mapper:
+  namespace: profiles
+  objects:
+    - id: upsertProfileByChannelProfileNo
+      sequence: update
+      query: >
+        INSERT INTO profiles (
+          channel_id,
+          profile_no,
+          name,
+          video_codec,
+          cctv_rtsp_url,
+          enabled
+        ) VALUES (
+          #{channel_id},
+          #{profile_no},
+          #{name},
+          #{video_codec},
+          #{cctv_rtsp_url},
+          #{enabled}
+        )
+        ON CONFLICT (channel_id, profile_no)
+        DO UPDATE
+        SET
+            name = EXCLUDED.name,
+            video_codec = EXCLUDED.video_codec,
+            cctv_rtsp_url = EXCLUDED.cctv_rtsp_url,
+            enabled = EXCLUDED.enabled
+
+    - id: selectProfileByChannelProfilelNo
+      sequence: select
+      query: >
+        SELECT
+          profile_id,
+          channel_id,
+          profile_no,
+          name,
+          video_codec,
+          audio_codec,
+          cctv_rtsp_url,
+          enabled
+        FROM profiles
+        WHERE channel_id = #{channel_id}
+          AND profile_no = #{profile_no}

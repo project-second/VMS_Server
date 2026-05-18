@@ -1,0 +1,145 @@
+mapper:
+  namespace: devices
+  objects:
+    - id: upsertDeviceByUuid
+      sequence: update
+      query: >
+        INSERT INTO devices (
+          type,
+          uuid,
+          addr,
+          name,
+          manufacturer,
+          model,
+          username,
+          password_enc
+        ) VALUES (
+          #{type},
+          #{uuid},
+          #{addr},
+          #{name},
+          #{manufacturer},
+          #{model},
+          #{username},
+          #{password_enc}
+        )
+        ON CONFLICT (uuid)
+        DO UPDATE SET
+          type = EXCLUDED.type,
+          addr = EXCLUDED.addr,
+          manufacturer = EXCLUDED.manufacturer,
+          model = EXCLUDED.model,
+          username = EXCLUDED.username,
+          password_enc = EXCLUDED.password_enc
+
+    - id: getDeviceById
+      sequence: select
+      query: >
+        SELECT
+          device_id,
+          type,
+          uuid,
+          addr,
+          name,
+          manufacturer,
+          model,
+          username,
+          password_enc,
+          created_at
+        FROM devices
+        WHERE device_id = #{device_id}
+
+    - id: getDeviceByUuid
+      sequence: select
+      query: >
+        SELECT
+          device_id,
+          type,
+          uuid,
+          addr,
+          name,
+          manufacturer,
+          model,
+          username,
+          password_enc,
+          created_at
+        FROM devices
+        WHERE uuid = #{uuid}
+
+    - id: listDevices
+      sequence: select
+      query: >
+        SELECT
+          device_id,
+          type,
+          uuid,
+          addr,
+          name,
+          manufacturer,
+          model,
+          username,
+          password_enc,
+          created_at
+        FROM devices
+        ORDER BY device_id DESC
+
+    - id: updateDeviceAddrByUuid
+      sequence: update
+      query: >
+        UPDATE devices
+        SET
+          addr = #{addr}
+        WHERE uuid = #{uuid}
+
+    - id: upsertDeviceHealth
+      sequence: update
+      query: >
+        INSERT INTO device_health (
+          device_id,
+          conn_state,
+          video_state,
+          rtt_ms,
+          rssi,
+          updated_at
+        ) VALUES (
+          #{device_id},
+          #{conn_state},
+          #{video_state},
+          #{rtt_ms},
+          #{rssi},
+          now()
+        )
+        ON CONFLICT (device_id)
+        DO UPDATE SET
+          conn_state = EXCLUDED.conn_state,
+          video_state = EXCLUDED.video_state,
+          rtt_ms = EXCLUDED.rtt_ms,
+          rssi = EXCLUDED.rssi,
+          updated_at = now()
+
+    - id: markStaleDeviceHealthOffline
+      sequence: update
+      query: >
+        UPDATE device_health dh
+        SET
+          conn_state = 'OFFLINE',
+          updated_at = now()
+        FROM devices d
+        WHERE d.device_id = dh.device_id
+          AND d.uuid <> #{online_uuid}
+          AND dh.conn_state <> 'OFFLINE'
+          AND dh.updated_at < (now() - (#{stale_seconds} * interval '1 second'))
+
+    - id: getDeviceHealthByDeviceId
+      sequence: select
+      query: >
+        SELECT
+          device_id,
+          conn_state,
+          video_state,
+          rtt_ms,
+          rssi,
+          updated_at
+        FROM device_health
+        WHERE device_id = #{device_id}
+

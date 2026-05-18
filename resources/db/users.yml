@@ -1,0 +1,49 @@
+mapper:
+  namespace: users
+  objects:
+    - id: createUser
+      sequence: insert
+      query: >
+        INSERT INTO users (
+          login_id,
+          name,
+          pw_hash
+        ) VALUES (
+          #{login_id},
+          #{name},
+          #{pw_hash}
+        )
+
+    - id: getUserByLoginId
+      sequence: select
+      query: >
+        SELECT
+          user_id,
+          login_id,
+          name,
+          pw_hash,
+          created_at,
+          last_login_at
+        FROM users
+        WHERE login_id = #{login_id}
+
+    - id: updateLastLogin
+      sequence: update
+      query: >
+        UPDATE users
+        SET last_login_at = now()
+        WHERE user_id = #{user_id}
+
+    - id: listSelectedDevicesByUser
+      sequence: select
+      query: >
+        SELECT
+          uds.id,
+          uds.user_id,
+          uds.device_id,
+          uds.selected,
+          uds.applied_at
+        FROM user_device_selection uds
+        WHERE uds.user_id = #{user_id}
+          AND uds.selected = TRUE
+        ORDER BY uds.applied_at DESC

@@ -1,0 +1,21 @@
+services:
+  server:
+    image: linear-cctv-vms-server-dev
+    container_name: linear-cctv-vms-server-dev
+    stdin_open: true
+    tty: true
+    working_dir: /workspace
+    command: bash -lc "pg_ctlcluster 16 main start && exec bash"
+    ports:
+      - "8080:80"
+      - "5432:5432"
+      - "8554:8554"
+    volumes:
+      - .:/workspace
+      - vms-postgres-data:/var/lib/postgresql
+      - ./postgres/postgresql.conf:/etc/postgresql/16/main/postgresql.conf:ro
+      - ./postgres/pg_hba.conf:/etc/postgresql/16/main/pg_hba.conf:ro
+
+volumes:
+  vms-postgres-data:
+    external: true
