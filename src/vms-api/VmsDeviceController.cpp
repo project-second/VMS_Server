@@ -321,40 +321,165 @@ httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/tours", [this](c
             {
                 {"tourId", 1},
                 {"tourName", "Tour 1"},
-                {"presetCount", 5}
+                {"isEnabled", true},
+                {"itemCount", 5}
             },
             {
                 {"tourId", 2},
                 {"tourName", "Tour 2"},
-                {"presetCount", 3}
+                {"isEnabled", false},
+                {"itemCount", 3}
             }
         }),
         "error", nullptr
     };
     res.body = response_body.dump();
     return res;
+});
 }
 
 void VmsDeviceController::handleCreateChannelTour() {
-
+httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours", [this](const Http::Request& req) -> Http::Response {
+    const std::string* channelNo = req.getPathParam("channelNo");
+    
+    // TODO 아래는 예시
+    Http::Response res;
+    res.setStatus(HttpCode::OK);
+    res.headers.set("Content-Type", "application/json");
+    json response_body = {
+        "ok", true,
+        "data", {
+            {"result", "OK"}
+        },
+        "error", nullptr
+    };
+    res.body = response_body.dump();
+    return res;
+});
 }
 
 void VmsDeviceController::handleGetChannelTourInfo() {
-
+httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/tours/{tourId}", [this](const Http::Request& req) -> Http::Response {
+    const std::string* channelNo = req.getPathParam("channelNo");
+    const std::string* tourId = req.getPathParam("tourId");
+    
+    // TODO 아래는 예시
+    Http::Response res;
+    res.setStatus(HttpCode::OK);
+    res.headers.set("Content-Type", "application/json");
+    json response_body = {
+        "ok", true,
+        "data", {
+            {"tourId", *tourId},
+            {"tourName", "Tour 1"},
+            {"repeatMode", "LOOP"},
+            {"isEnabled", true},
+            {"items", json::array({
+                {
+                    {"tourItemId", 1},
+                    {"presetId", 1},
+                    {"presetName", "Preset 1"},
+                    {"seqNo", 1},
+                    {"staySecond", 5},
+                    {"moveSpeed", 50}
+                },
+                {
+                    {"tourItemId", 2},
+                    {"presetId", 2},
+                    {"presetName", "Preset 2"},
+                    {"seqNo", 2},
+                    {"staySecond", 10},
+                    {"moveSpeed", 50}
+                }
+            })}
+        },
+        "error", nullptr
+    };
+    res.body = response_body.dump();
+    return res;
+});
 }
 
 void VmsDeviceController::handleStartChannelTour() {
-
+httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours/{tourId}/start", [this](const Http::Request& req) -> Http::Response {
+    const std::string* channelNo = req.getPathParam("channelNo");
+    const std::string* tourId = req.getPathParam("tourId");
+    
+    // TODO 아래는 예시
+    Http::Response res;
+    res.setStatus(HttpCode::OK);
+    res.headers.set("Content-Type", "application/json");
+    json response_body = {
+        "ok", true,
+        "data", {
+            {"result", "OK"}
+        },
+        "error", nullptr
+    };
+    res.body = response_body.dump();
+    return res;
+});
 }
 
 void VmsDeviceController::handleStopChannelTour() {
-
+httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours/{tourId}/stop", [this](const Http::Request& req) -> Http::Response {
+    const std::string* channelNo = req.getPathParam("channelNo");
+    const std::string* tourId = req.getPathParam("tourId");
+    
+    // TODO 아래는 예시
+    Http::Response res;
+    res.setStatus(HttpCode::OK);
+    res.headers.set("Content-Type", "application/json");
+    json response_body = {
+        "ok", true,
+        "data", {
+            {"result", "OK"}
+        },
+        "error", nullptr
+    };
+    res.body = response_body.dump();
+    return res;
+});
 }
 
 void VmsDeviceController::handleUpdateChannelTourInfo() {
-
+httpServer.addRoute(HttpMethod::PUT, "/channels/{channelId}/ptz/tours/{tourId}", [this](const Http::Request& req) -> Http::Response {
+    const std::string* channelNo = req.getPathParam("channelNo");
+    const std::string* tourId = req.getPathParam("tourId");
+    
+    // TODO 아래는 예시
+    Http::Response res;
+    res.setStatus(HttpCode::OK);
+    res.headers.set("Content-Type", "application/json");
+    json response_body = {
+        "ok", true,
+        "data", {
+            {"result", "OK"}
+        },
+        "error", nullptr
+    };
+    res.body = response_body.dump();
+    return res;
+});
 }
 
 void VmsDeviceController::handleDeleteChannelTour() {
-
+httpServer.addRoute(HttpMethod::DELETE, "/channels/{channelId}/ptz/tours/{tourId}", [this](const Http::Request& req) -> Http::Response {
+    const std::string* channelNo = req.getPathParam("channelNo");
+    const std::string* tourId = req.getPathParam("tourId");
+    
+    // TODO 아래는 예시
+    Http::Response res;
+    res.setStatus(HttpCode::OK);
+    res.headers.set("Content-Type", "application/json");
+    json response_body = {
+        "ok", true,
+        "data", {
+            {"result", "OK"}
+        },
+        "error", nullptr
+    };
+    res.body = response_body.dump();
+    return res;
+});
 }
