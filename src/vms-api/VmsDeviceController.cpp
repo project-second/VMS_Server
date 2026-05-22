@@ -2,7 +2,27 @@
 
 VmsDeviceController::VmsDeviceController(HttpServer& server) : httpServer(server) {}
 
-VmsDeviceController::~VmsDeviceController() {}
+VmsDeviceController::~VmsDeviceController() {
+    handleGetDeviceList();
+    handleChangeDeviceName();
+    handleGetDeviceChannelList();
+    handleChannelPanControl();
+    handleChannelTiltControl();;
+    handleChannelLinearControl();
+    handleChannelStopControl();
+    handleGetChannelPresetList();
+    handleSetChannelPreset();
+    handleGoToChannelPreset();
+    handleUpdateChannelPreset();
+    handleDeleteChannelPreset();
+    handleGetChannelTourList();
+    handleCreateChannelTour();
+    handleGetChannelTourInfo();
+    handleStartChannelTour();
+    handleStopChannelTour();
+    handleUpdateChannelTourInfo();
+    handleDeleteChannelTour();
+}
 
 void VmsDeviceController::handleGetDeviceList() {
 httpServer.addRoute(HttpMethod::GET, "/devices", [this](const Http::Request& req) -> Http::Response {   
