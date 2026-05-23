@@ -7,14 +7,52 @@ mapper:
         INSERT INTO users (
           login_id,
           name,
-          pw_hash
+          pw_hash,
+          is_active
         ) VALUES (
           #{login_id},
           #{name},
-          #{pw_hash}
+          #{pw_hash},
+          false
+        )
+
+    - id: createPendingApproval
+      sequence: insert
+      query: >
+        INSERT INTO user_approvals (
+          user_id,
+          status,
+          requested_at
+        ) VALUES (
+          #{user_id},
+          'PENDING',
+          NOW()
         )
 
     - id: getUserByLoginId
+      sequence: select
+      query: >
+        SELECT
+          u.user_id,
+          u.login_id,
+          u.name,
+          u.pw_hash,
+          u.is_active,
+          u.created_at,
+          u.last_login_at,
+          ua.status AS approval_status
+        FROM users u
+        LEFT JOIN LATERAL (
+          SELECT status
+          FROM user_approvals
+          WHERE user_id = u.user_id
+          ORDER BY requested_at DESC, approval_id DESC
+          LIMIT 1
+        ) ua ON true
+        WHERE u.login_id = #{login_id}
+        LIMIT 1
+
+    - id: getUserById
       sequence: select
       query: >
         SELECT
@@ -22,28 +60,57 @@ mapper:
           login_id,
           name,
           pw_hash,
+          is_active,
           created_at,
           last_login_at
         FROM users
-        WHERE login_id = #{login_id}
+        WHERE user_id = #{user_id}
+        LIMIT 1
+
+    - id: getUserRoles
+      sequence: select
+      query: >
+        SELECT
+          r.role_code,
+          r.role_name
+        FROM user_roles ur
+        INNER JOIN roles r ON r.role_id = ur.role_id
+        WHERE ur.user_id = #{user_id}
+        ORDER BY r.role_code
 
     - id: updateLastLogin
       sequence: update
       query: >
         UPDATE users
-        SET last_login_at = now()
+        SET last_login_at = NOW()
         WHERE user_id = #{user_id}
 
-    - id: listSelectedDevicesByUser
-      sequence: select
+    - id: updateUserName
+      sequence: update
       query: >
-        SELECT
-          uds.id,
-          uds.user_id,
-          uds.device_id,
-          uds.selected,
-          uds.applied_at
-        FROM user_device_selection uds
-        WHERE uds.user_id = #{user_id}
-          AND uds.selected = TRUE
-        ORDER BY uds.applied_at DESC
+        UPDATE users
+        SET name = #{name}
+        WHERE user_id = #{user_id}
+
+    - id: updateUserPassword
+      sequence: update
+      query: >
+        UPDATE users
+        SET pw_hash = #{pw_hash}
+        WHERE user_id = #{user_id}
+
+    - id: updateUserNameAndPassword
+      sequence: update
+      query: >
+        UPDATE users
+        SET
+          name = #{name},
+          pw_hash = #{pw_hash}
+        WHERE user_id = #{user_id}
+
+    - id: deactivateUser
+      sequence: update
+      query: >
+        UPDATE users
+        SET is_active = false
+        WHERE user_id = #{user_id}

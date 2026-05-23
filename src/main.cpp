@@ -1,6 +1,12 @@
 #include "ApplicationConfigLoader.h"
 
+#include "DbRuntime.hpp"
 #include "HttpServer.h"
+#include "VmsUserController.h"
+#include "VmsUserService.h"
+
+#include <chrono>
+#include <thread>
 
 int main(int argc, char const* argv[]) {
     AppRuntimeConfig config;
@@ -11,15 +17,20 @@ int main(int argc, char const* argv[]) {
     const std::string serverHost = config.serverHost;
     const int port = config.serverPort;
     const int server_threads = config.serverThreads;
-    const int client_pool_threads = config.clientPoolThreads;
-    const int client_pool_max_queue = config.clientPoolMaxQueue;
 
+    AppDb::configure(config.dbConninfo, config.dbMapperPath);
 
     HttpServer server(serverHost, port, server_threads);
+    VmsUserService userService;
+    VmsUserController userController(server, userService);
 
-    
+    if (!server.start()) {
+        return 1;
+    }
 
-    server.start();
+    while (true) {
+        std::this_thread::sleep_for(std::chrono::hours(24));
+    }
 
     return 0;
 }

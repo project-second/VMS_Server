@@ -38,12 +38,3 @@ app:
   # cctv:
   #   id: "admin"
   #   pw: "5hanwha!"
-
-  # mediamtx:
-  #   apiHost: "127.0.0.1"
-  #   apiPort: 9997
-  #   playbackHost: "127.0.0.1"
-  #   playbackPort: 9996
-  #   playbackSyncIntervalMs: 30000
-  #   rtspHost: "127.0.0.1"
-  #   rtspPort: 8554
