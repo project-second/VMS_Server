@@ -68,6 +68,63 @@ docker compose down
 docker compose down -v
 ```
 
+
+## 프로젝트 빌드 및 배포
+
+아래 명령은 Docker 개발 컨테이너 안에서 프로젝트 루트를 기준으로 실행합니다.
+
+### 빌드
+
+```bash
+cmake -S . -B build -G Ninja
+cmake --build build
+```
+
+빌드가 완료되면 실행 파일은 `build/vms_server`에 생성됩니다.
+
+### 설치 구조 확인
+
+CPack 패키지를 만들기 전에 `cmake --install`로 배포 구조를 먼저 확인할 수 있습니다.
+
+```bash
+cmake --install build --prefix dist/vms_server
+```
+
+설치 결과는 다음 구조를 가집니다.
+
+```text
+dist/vms_server/
+  bin/vms_server
+  resources/application.yml
+  resources/db/users.yml
+```
+
+애플리케이션은 현재 작업 디렉터리 기준으로 `resources/application.yml`을 읽으므로, 설치 루트로 이동한 뒤 실행합니다.
+
+```bash
+cd dist/vms_server
+./bin/vms_server
+```
+
+### CPack 패키지 생성
+
+배포용 압축 패키지는 다음 명령으로 생성합니다.
+
+```bash
+cpack --config build/CPackConfig.cmake
+```
+
+기본 패키지 형식은 `TGZ`이며, 생성된 `.tar.gz` 파일에는 실행 파일과 `resources` 디렉터리가 함께 포함됩니다.
+
+패키지를 풀고 실행하려면 다음과 같이 진행합니다.
+
+```bash
+tar -xzf vms_server-0.1.0-Linux.tar.gz
+cd vms_server-0.1.0-Linux
+./bin/vms_server
+```
+
+
 ## 데이터베이스 설정
 - USER: vms_user
 - PASSWORD: veda1234

@@ -4,6 +4,9 @@
 #include "LogSync.h"
 #include "HttpServer.h"
 
+#include "VmsAdminService.h"
+#include "VmsUserService.h"
+
 #include "nlohmann/json.hpp"
 
 using json = nlohmann::json;
@@ -11,11 +14,14 @@ using json = nlohmann::json;
 class VmsAdminController {
 private:
     HttpServer& httpServer;
+    VmsAdminService& adminService;
+    VmsUserService& userService;
 
 public:
-    VmsAdminController(HttpServer& server);
+    VmsAdminController(HttpServer& server, VmsAdminService& adminService, VmsUserService& userService);
     ~VmsAdminController();
 
+private:
     void handleGetUserApprovals();
     void handleApproveUser();
     void handleRejectUser();

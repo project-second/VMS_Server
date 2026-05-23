@@ -2,6 +2,8 @@
 
 #include "DbRuntime.hpp"
 #include "HttpServer.h"
+#include "VmsAdminController.h"
+#include "VmsAdminService.h"
 #include "VmsUserController.h"
 #include "VmsUserService.h"
 
@@ -22,7 +24,9 @@ int main(int argc, char const* argv[]) {
 
     HttpServer server(serverHost, port, server_threads);
     VmsUserService userService;
+    VmsAdminService adminService;
     VmsUserController userController(server, userService);
+    VmsAdminController adminController(server, adminService, userService);
 
     if (!server.start()) {
         return 1;

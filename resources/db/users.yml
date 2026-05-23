@@ -71,6 +71,7 @@ mapper:
       sequence: select
       query: >
         SELECT
+          r.role_id,
           r.role_code,
           r.role_name
         FROM user_roles ur
@@ -114,3 +115,114 @@ mapper:
         UPDATE users
         SET is_active = false
         WHERE user_id = #{user_id}
+
+    - id: updateUserActiveStatus
+      sequence: update
+      query: >
+        UPDATE users
+        SET is_active = #{is_active}
+        WHERE user_id = #{user_id}
+
+    - id: listUserApprovals
+      sequence: select
+      query: >
+        SELECT
+          ua.approval_id,
+          ua.user_id,
+          u.login_id,
+          u.name,
+          ua.status,
+          ua.requested_at
+        FROM user_approvals ua
+        INNER JOIN users u ON u.user_id = ua.user_id
+        WHERE (#{status} = '' OR ua.status = #{status})
+        ORDER BY ua.requested_at DESC, ua.approval_id DESC
+        LIMIT #{limit}
+        OFFSET #{offset}
+
+    - id: countUserApprovals
+      sequence: select
+      query: >
+        SELECT COUNT(*) AS total_count
+        FROM user_approvals ua
+        WHERE (#{status} = '' OR ua.status = #{status})
+
+    - id: getApprovalById
+      sequence: select
+      query: >
+        SELECT
+          approval_id,
+          user_id,
+          status,
+          requested_at,
+          reviewed_by,
+          reviewed_at,
+          reject_reason
+        FROM user_approvals
+        WHERE approval_id = #{approval_id}
+        LIMIT 1
+
+    - id: approveUserApproval
+      sequence: update
+      query: >
+        UPDATE user_approvals
+        SET
+          status = 'APPROVED',
+          reviewed_by = #{reviewed_by},
+          reviewed_at = NOW(),
+          reject_reason = NULL
+        WHERE approval_id = #{approval_id}
+
+    - id: rejectUserApproval
+      sequence: update
+      query: >
+        UPDATE user_approvals
+        SET
+          status = 'REJECTED',
+          reviewed_by = #{reviewed_by},
+          reviewed_at = NOW(),
+          reject_reason = #{reject_reason}
+        WHERE approval_id = #{approval_id}
+
+    - id: getRoleByCode
+      sequence: select
+      query: >
+        SELECT
+          role_id,
+          role_code,
+          role_name
+        FROM roles
+        WHERE role_code = #{role_code}
+        LIMIT 1
+
+    - id: userHasRole
+      sequence: select
+      query: >
+        SELECT 1 AS found
+        FROM user_roles ur
+        INNER JOIN roles r ON r.role_id = ur.role_id
+        WHERE ur.user_id = #{user_id}
+          AND r.role_code = #{role_code}
+        LIMIT 1
+
+    - id: addUserRole
+      sequence: insert
+      query: >
+        INSERT INTO user_roles (
+          user_id,
+          role_id,
+          assinged_by,
+          assinged_at
+        ) VALUES (
+          #{user_id},
+          #{role_id},
+          #{assigned_by},
+          NOW()
+        )
+
+    - id: deleteUserRole
+      sequence: delete
+      query: >
+        DELETE FROM user_roles
+        WHERE user_id = #{user_id}
+          AND role_id = #{role_id}

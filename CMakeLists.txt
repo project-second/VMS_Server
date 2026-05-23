@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(vms_server LANGUAGES CXX)
+project(vms_server VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -21,7 +21,9 @@ find_package(yaml-cpp CONFIG REQUIRED)
 add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
-    ${CMAKE_SOURCE_DIR}/include/
+    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/include/vms-api
+    ${CMAKE_SOURCE_DIR}/third_party
     # ${OpenCV_INCLUDE_DIRS}
 )
 
@@ -33,3 +35,20 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     app-db
     app-security
 )
+
+install(TARGETS ${PROJECT_NAME}
+    RUNTIME DESTINATION bin
+)
+
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources
+    DESTINATION .
+)
+
+set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
+set(CPACK_PACKAGE_VENDOR "Linear CCTV")
+set(CPACK_PACKAGE_CONTACT "Linear CCTV")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "VMS Server")
+set(CPACK_PACKAGE_VERSION "${PROJECT_VERSION}")
+set(CPACK_GENERATOR "TGZ")
+
+include(CPack)

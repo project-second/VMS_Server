@@ -54,6 +54,14 @@ inline Http::Response internalServerErrorResponse() {
     return errorResponse(HttpCode::Internal_Server_Error, "INTERNAL_SERVER_ERROR");
 }
 
+inline Http::Response forbiddenResponse(const char* error_code = "AUTH_FORBIDDEN") {
+    return errorResponse(HttpCode::Forbidden, error_code);
+}
+
+inline Http::Response conflictResponse(const char* error_code) {
+    return errorResponse(HttpCode::Conflict, error_code);
+}
+
 inline Http::Response notFoundResponse() {
     return errorResponse(HttpCode::Not_Found, "NOT_FOUND");
 }

@@ -1,6 +1,7 @@
 #include "VmsUserService.h"
 
 #include "DbRuntime.hpp"
+#include "DbRowHelpers.h"
 #include "LogSync.h"
 #include "SecurityUtils.h"
 #include "StringHelpers.h"
@@ -64,68 +65,9 @@ std::string buildToken(const std::string& prefix, std::int64_t userId) {
     return sha256_hex(prefix + ":" + std::to_string(userId) + ":" + random_hex(64));
 }
 
-bool getStringCell(const DbTemplate::TypedRow& row, const std::string& key, std::string& out) {
-    const auto it = row.find(key);
-    if (it == row.end() || std::holds_alternative<std::monostate>(it->second)) return false;
-
-    if (const auto* value = std::get_if<std::string>(&it->second)) {
-        out = *value;
-        return true;
-    }
-    if (const auto* value = std::get_if<std::int64_t>(&it->second)) {
-        out = std::to_string(*value);
-        return true;
-    }
-    if (const auto* value = std::get_if<bool>(&it->second)) {
-        out = *value ? "true" : "false";
-        return true;
-    }
-    if (const auto* value = std::get_if<double>(&it->second)) {
-        out = std::to_string(*value);
-        return true;
-    }
-    return false;
-}
-
-bool getInt64Cell(const DbTemplate::TypedRow& row, const std::string& key, std::int64_t& out) {
-    const auto it = row.find(key);
-    if (it == row.end() || std::holds_alternative<std::monostate>(it->second)) return false;
-
-    if (const auto* value = std::get_if<std::int64_t>(&it->second)) {
-        out = *value;
-        return true;
-    }
-    if (const auto* value = std::get_if<std::string>(&it->second)) {
-        return parse_int64_strict(*value, out);
-    }
-    return false;
-}
-
-bool getBoolCell(const DbTemplate::TypedRow& row, const std::string& key, bool& out) {
-    const auto it = row.find(key);
-    if (it == row.end() || std::holds_alternative<std::monostate>(it->second)) return false;
-
-    if (const auto* value = std::get_if<bool>(&it->second)) {
-        out = *value;
-        return true;
-    }
-    if (const auto* value = std::get_if<std::string>(&it->second)) {
-        const std::string normalized = to_lower(trim(*value));
-        if (normalized == "true" || normalized == "t" || normalized == "1") {
-            out = true;
-            return true;
-        }
-        if (normalized == "false" || normalized == "f" || normalized == "0") {
-            out = false;
-            return true;
-        }
-    }
-    return false;
-}
-
 bool verifyPassword(const DbTemplate::TypedRow& user, const std::string& password) {
     std::string pwHash;
-    if (!getStringCell(user, "pw_hash", pwHash)) return false;
+    if (!DbRow::getStringCell(user, "pw_hash", pwHash)) return false;
     return sha256_hex(password) == pwHash;
 }
 
@@ -154,7 +96,7 @@ VmsUserService::LoginResult VmsUserService::login(const std::string& loginId, co
     const DbTemplate::TypedRow& user = users.front();
 
     std::int64_t userId = 0;
-    if (!getInt64Cell(user, "user_id", userId)) {
+    if (!DbRow::getInt64Cell(user, "user_id", userId)) {
         LogSync::error("[users.login] invalid row format: missing user_id for login_id=", loginId);
         return LoginResult{};
     }
@@ -171,7 +113,7 @@ VmsUserService::LoginResult VmsUserService::login(const std::string& loginId, co
     }
 
     std::string approvalStatus;
-    if (getStringCell(user, "approval_status", approvalStatus)) {
+    if (DbRow::getStringCell(user, "approval_status", approvalStatus)) {
         approvalStatus = to_lower(trim(approvalStatus));
         if (approvalStatus == "pending") {
             LoginResult result;
@@ -186,7 +128,7 @@ VmsUserService::LoginResult VmsUserService::login(const std::string& loginId, co
     }
 
     bool isActive = true;
-    if (getBoolCell(user, "is_active", isActive) && !isActive) {
+    if (DbRow::getBoolCell(user, "is_active", isActive) && !isActive) {
         LoginResult result;
         result.status = LoginStatus::Inactive;
         return result;
@@ -250,7 +192,7 @@ VmsUserService::SignupStatus VmsUserService::signup(
     }
 
     std::int64_t userId = 0;
-    if (!getInt64Cell(createdUsers.front(), "user_id", userId)) {
+    if (!DbRow::getInt64Cell(createdUsers.front(), "user_id", userId)) {
         LogSync::error("[users.signup] invalid created row format for login_id=", loginId);
         return SignupStatus::InternalError;
     }
@@ -323,7 +265,7 @@ VmsUserService::RefreshResult VmsUserService::refreshToken(const std::string& re
     }
 
     bool isActive = true;
-    if (getBoolCell(users.front(), "is_active", isActive) && !isActive) {
+    if (DbRow::getBoolCell(users.front(), "is_active", isActive) && !isActive) {
         RefreshResult result;
         result.status = RefreshStatus::InvalidRefreshToken;
         return result;
@@ -402,22 +344,22 @@ VmsUserService::UserInfoResult VmsUserService::getUserInfo(std::int64_t userId) 
     const DbTemplate::TypedRow& user = users.front();
     UserInfoResult result;
     result.status = UserInfoStatus::Success;
-    if (!getInt64Cell(user, "user_id", result.userId)
-        || !getStringCell(user, "login_id", result.loginId)
-        || !getStringCell(user, "name", result.name)) {
+    if (!DbRow::getInt64Cell(user, "user_id", result.userId)
+        || !DbRow::getStringCell(user, "login_id", result.loginId)
+        || !DbRow::getStringCell(user, "name", result.name)) {
         LogSync::error("[users.me] invalid row format for user_id=", userId);
         return UserInfoResult{};
     }
 
-    getStringCell(user, "created_at", result.createdAt);
-    getStringCell(user, "last_login_at", result.lastLoginAt);
+    DbRow::getStringCell(user, "created_at", result.createdAt);
+    DbRow::getStringCell(user, "last_login_at", result.lastLoginAt);
 
     DbTemplate::ParamMap roleParams;
     roleParams.emplace("user_id", userId);
     const auto roles = AppDb::select("users.getUserRoles", roleParams);
     for (const auto& role : roles) {
         std::string roleCode;
-        if (getStringCell(role, "role_code", roleCode)) {
+        if (DbRow::getStringCell(role, "role_code", roleCode)) {
             result.roles.emplace_back(std::move(roleCode));
         }
     }
@@ -483,9 +425,9 @@ VmsUserService::UpdateResult VmsUserService::updateUserInfo(
 
     UpdateResult result;
     result.status = UpdateStatus::Success;
-    getInt64Cell(updatedUsers.front(), "user_id", result.userId);
-    getStringCell(updatedUsers.front(), "login_id", result.loginId);
-    getStringCell(updatedUsers.front(), "name", result.name);
+    DbRow::getInt64Cell(updatedUsers.front(), "user_id", result.userId);
+    DbRow::getStringCell(updatedUsers.front(), "login_id", result.loginId);
+    DbRow::getStringCell(updatedUsers.front(), "name", result.name);
     result.updatedAt = utc_now_iso8601();
     return result;
 }

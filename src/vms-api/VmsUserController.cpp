@@ -1,24 +1,10 @@
 #include "VmsUserController.h"
 
 #include "VmsApiResponses.h"
+#include "VmsRequestHelpers.h"
 #include "StringHelpers.h"
 
-#include <optional>
-
 namespace {
-
-std::optional<std::string> extractBearerToken(const Http::Request& req) {
-    const std::string* authorization = req.headers.get("authorization");
-    if (authorization == nullptr) return std::nullopt;
-
-    const std::string value = trim(*authorization);
-    constexpr const char* kPrefix = "Bearer ";
-    if (!starts_with_case_insensitive(value, kPrefix)) return std::nullopt;
-
-    const std::string token = trim(value.substr(7));
-    if (token.empty()) return std::nullopt;
-    return token;
-}
 
 Http::Response invalidCredentialsResponse() {
     return VmsApiResponse::jsonResponse(HttpCode::Unauthorized, {
@@ -77,16 +63,6 @@ Http::Response invalidPasswordResponse() {
     });
 }
 
-std::optional<json> parseJsonObject(const Http::Request& req) {
-    try {
-        json body = json::parse(req.body);
-        if (!body.is_object()) return std::nullopt;
-        return body;
-    } catch (const json::exception&) {
-        return std::nullopt;
-    }
-}
-
 } // namespace
 
 VmsUserController::VmsUserController(HttpServer& server, VmsUserService& userService)
@@ -104,7 +80,7 @@ VmsUserController::~VmsUserController() {}
 
 void VmsUserController::handleUserLogin() {
 httpServer.addRoute(HttpMethod::POST, "/users/login", [this](const Http::Request& req) -> Http::Response {
-    const auto requestBody = parseJsonObject(req);
+    const auto requestBody = VmsRequest::parseJsonObject(req);
     if (!requestBody
         || !requestBody->contains("id") || !(*requestBody)["id"].is_string()
         || !requestBody->contains("pw") || !(*requestBody)["pw"].is_string()) {
@@ -146,8 +122,8 @@ httpServer.addRoute(HttpMethod::POST, "/users/login", [this](const Http::Request
 
 void VmsUserController::handleUserLogout() {
 httpServer.addRoute(HttpMethod::POST, "/users/logout", [this](const Http::Request& req) -> Http::Response {
-    const auto accessToken = extractBearerToken(req);
-    const auto requestBody = parseJsonObject(req);
+    const auto accessToken = VmsRequest::extractBearerToken(req);
+    const auto requestBody = VmsRequest::parseJsonObject(req);
     if (!accessToken
         || !requestBody
         || !requestBody->contains("refreshToken")
@@ -171,7 +147,7 @@ httpServer.addRoute(HttpMethod::POST, "/users/logout", [this](const Http::Reques
 
 void VmsUserController::handleUserSignup() {
 httpServer.addRoute(HttpMethod::POST, "/users/signup", [this](const Http::Request& req) -> Http::Response {
-    const auto requestBody = parseJsonObject(req);
+    const auto requestBody = VmsRequest::parseJsonObject(req);
     if (!requestBody
         || !requestBody->contains("id") || !(*requestBody)["id"].is_string()
         || !requestBody->contains("name") || !(*requestBody)["name"].is_string()
@@ -204,7 +180,7 @@ httpServer.addRoute(HttpMethod::POST, "/users/signup", [this](const Http::Reques
 
 void VmsUserController::handleGetUserInfo() {
 httpServer.addRoute(HttpMethod::GET, "/users/me", [this](const Http::Request& req) -> Http::Response {
-    const auto accessToken = extractBearerToken(req);
+    const auto accessToken = VmsRequest::extractBearerToken(req);
     if (!accessToken) {
         return VmsApiResponse::invalidTokenResponse();
     }
@@ -235,7 +211,7 @@ httpServer.addRoute(HttpMethod::GET, "/users/me", [this](const Http::Request& re
 
 void VmsUserController::handleUpdateUserInfo() {
 httpServer.addRoute(HttpMethod::PATCH, "/users/me", [this](const Http::Request& req) -> Http::Response {
-    const auto accessToken = extractBearerToken(req);
+    const auto accessToken = VmsRequest::extractBearerToken(req);
     if (!accessToken) {
         return VmsApiResponse::invalidTokenResponse();
     }
@@ -245,7 +221,7 @@ httpServer.addRoute(HttpMethod::PATCH, "/users/me", [this](const Http::Request& 
         return VmsApiResponse::invalidTokenResponse();
     }
 
-    const auto requestBody = parseJsonObject(req);
+    const auto requestBody = VmsRequest::parseJsonObject(req);
     if (!requestBody
         || !requestBody->contains("currentPassword")
         || !(*requestBody)["currentPassword"].is_string()) {
@@ -298,7 +274,7 @@ httpServer.addRoute(HttpMethod::PATCH, "/users/me", [this](const Http::Request& 
 
 void VmsUserController::handleDeleteUser() {
 httpServer.addRoute(HttpMethod::DELETE, "/users/me", [this](const Http::Request& req) -> Http::Response {
-    const auto accessToken = extractBearerToken(req);
+    const auto accessToken = VmsRequest::extractBearerToken(req);
     if (!accessToken) {
         return VmsApiResponse::invalidTokenResponse(true, false);
     }
@@ -308,7 +284,7 @@ httpServer.addRoute(HttpMethod::DELETE, "/users/me", [this](const Http::Request&
         return VmsApiResponse::invalidTokenResponse(true, false);
     }
 
-    const auto requestBody = parseJsonObject(req);
+    const auto requestBody = VmsRequest::parseJsonObject(req);
     if (!requestBody
         || !requestBody->contains("currentPassword")
         || !(*requestBody)["currentPassword"].is_string()
@@ -333,7 +309,7 @@ httpServer.addRoute(HttpMethod::DELETE, "/users/me", [this](const Http::Request&
 
 void VmsUserController::handleRefreshToken() {
 httpServer.addRoute(HttpMethod::POST, "/users/token/refresh", [this](const Http::Request& req) -> Http::Response {
-    const auto requestBody = parseJsonObject(req);
+    const auto requestBody = VmsRequest::parseJsonObject(req);
     if (!requestBody
         || !requestBody->contains("refreshToken")
         || !(*requestBody)["refreshToken"].is_string()) {
