@@ -2,6 +2,7 @@
 
 #include "DbRuntime.hpp"
 #include "HttpServer.h"
+#include "OnvifDiscoveryService.h"
 #include "VmsAdminController.h"
 #include "VmsAdminService.h"
 #include "VmsUserController.h"
@@ -28,9 +29,15 @@ int main(int argc, char const* argv[]) {
     VmsUserController userController(server, userService);
     VmsAdminController adminController(server, adminService, userService);
 
+    OnvifDiscoveryOptions onvifOptions;
+    onvifOptions.interval = std::chrono::milliseconds(config.onvifDiscoveryIntervalMs);
+    OnvifDiscoveryService onvifDiscovery(onvifOptions);
+
     if (!server.start()) {
         return 1;
     }
+
+    onvifDiscovery.start();
 
     while (true) {
         std::this_thread::sleep_for(std::chrono::hours(24));

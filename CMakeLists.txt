@@ -14,6 +14,8 @@ add_subdirectory(lib/app-util)
 add_subdirectory(lib/app-http)
 add_subdirectory(lib/app-db)
 add_subdirectory(lib/app-security)
+add_subdirectory(lib/app-onvif)
+add_subdirectory(third_party/onvif)
 
 find_package(yaml-cpp CONFIG REQUIRED)
 # find_package(OpenCV QUIET)
@@ -34,6 +36,8 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     app-http
     app-db
     app-security
+    app-onvif
+    onvif-gsoap
 )
 
 install(TARGETS ${PROJECT_NAME}
