@@ -1,0 +1,193 @@
+# app-onvif
+
+`app-onvif`는 VMS 서버의 ONVIF 기능을 담당하는 모듈이다. SOAP XML을 직접 문자열로 만들지 않고, gSOAP가 생성한 타입과 client stub을 사용한다.
+
+현재 구현 범위는 다음과 같다.
+
+- WS-Discovery active Probe
+- WS-Discovery passive listener: Hello, Bye 수신
+- WS-Discovery Resolve
+- ONVIF Device Service `GetDeviceInformation`
+
+아직 인증, DB 저장, Media Service 호출은 구현하지 않았다.
+
+## Directory
+
+```text
+lib/app-onvif/
+  CMakeLists.txt
+  OnvifDiscoveryService.cpp
+  OnvifDeviceClient.cpp
+  onvif_services.h
+  include/
+    OnvifDiscoveryService.h
+    OnvifDeviceClient.h
+  wsdl/
+    ver10/device/wsdl/devicemgmt.wsdl
+    ver10/schema/*.xsd
+  external/
+    *.xsd
+```
+
+`wsdl/`과 `external/`은 gSOAP 코드 생성을 위한 입력 파일이다. 생성된 `soapH.h`, `soapC.cpp`, `soapClient.cpp`, `*.nsmap` 파일은 source tree가 아니라 CMake build directory 아래에 만들어진다.
+
+## Build
+
+상위 CMake에서 `add_subdirectory(lib/app-onvif)`로 포함된다. 이 모듈의 CMake는 빌드 중 다음 순서로 gSOAP 코드를 생성한다.
+
+```text
+devicemgmt.wsdl
+  -> wsdl2h
+  -> generated/onvif_device.h
+  -> soapcpp2(onvif_services.h)
+  -> generated/soapH.h, soapC.cpp, soapClient.cpp, *.nsmap
+```
+
+필요한 도구와 library는 다음과 같다.
+
+- `wsdl2h`
+- `soapcpp2`
+- `gsoap++`
+- gSOAP plugin: `wsddapi.c`, `wsaapi.c`
+
+Discovery와 Device Service는 하나의 `onvif_services.h`로 통합 생성한다.
+
+```cpp
+#import "wsdd.h"
+#import "onvif_device.h"
+```
+
+이렇게 묶는 이유는 Discovery와 Device를 따로 생성했을 때 `soapC.cpp` serializer symbol이 중복될 수 있기 때문이다.
+
+## Discovery 사용법
+
+가장 단순한 1회 Discover 예시는 다음과 같다.
+
+```cpp
+#include "OnvifDiscoveryService.h"
+
+OnvifDiscoveryService discovery;
+std::vector<OnvifDiscoveredDevice> devices = discovery.discoverOnce();
+
+for (const OnvifDiscoveredDevice& device : devices) {
+    // device.endpointReference: 장비 식별자에 가까운 값
+    // device.xaddrs: Device Service 호출에 사용할 endpoint 후보
+}
+```
+
+주기 Probe와 passive listener를 함께 켜려면 `start()`를 사용한다.
+
+```cpp
+OnvifDiscoveryOptions options;
+options.interval = std::chrono::milliseconds(300000);
+
+OnvifDiscoveryService discovery(options);
+discovery.start();
+
+// application running...
+
+discovery.stop();
+```
+
+`start()`는 내부적으로 다음을 함께 수행한다.
+
+- 설정된 interval마다 active Probe 실행
+- UDP 3702 passive listener 실행
+- Hello 수신 시 장비 online/upsert
+- Bye 수신 시 장비 offline 처리
+
+## Resolve 사용법
+
+이미 알고 있는 EndpointReference의 `XAddrs`를 다시 확인하려면 `resolveOnce()`를 사용한다.
+
+```cpp
+std::optional<OnvifDiscoveredDevice> resolved =
+    discovery.resolveOnce(endpointReference);
+
+if (resolved && !resolved->xaddrs.empty()) {
+    const std::string& deviceServiceUrl = resolved->xaddrs.front();
+}
+```
+
+## GetDeviceInformation 사용법
+
+`GetDeviceInformation`에는 Discovery 결과의 `xaddrs` 중 Device Service URL을 넘긴다. `endpointReference`가 아니라 `xaddrs`를 사용해야 한다.
+
+```cpp
+#include "OnvifDeviceClient.h"
+#include "OnvifDiscoveryService.h"
+
+OnvifDiscoveryService discovery;
+OnvifDeviceClient deviceClient;
+
+std::vector<OnvifDiscoveredDevice> devices = discovery.discoverOnce();
+
+for (const OnvifDiscoveredDevice& device : devices) {
+    if (device.xaddrs.empty()) {
+        continue;
+    }
+
+    const std::string& deviceServiceUrl = device.xaddrs.front();
+    std::optional<OnvifDeviceInformation> info =
+        deviceClient.getDeviceInformation(deviceServiceUrl);
+
+    if (!info) {
+        continue;
+    }
+
+    // info->manufacturer
+    // info->model
+    // info->firmwareVersion
+    // info->serialNumber
+    // info->hardwareId
+}
+```
+
+실전에서는 `xaddrs.front()`를 바로 쓰기보다 접근 가능한 HTTP/HTTPS endpoint를 고르는 helper를 두는 편이 좋다.
+
+```cpp
+std::optional<std::string> pickDeviceServiceUrl(const OnvifDiscoveredDevice& device) {
+    for (const std::string& xaddr : device.xaddrs) {
+        if (xaddr.rfind("http://", 0) == 0 || xaddr.rfind("https://", 0) == 0) {
+            return xaddr;
+        }
+    }
+
+    return std::nullopt;
+}
+```
+
+## main.cpp 연결 방향
+
+현재 `src/main.cpp`는 `OnvifDiscoveryService`를 생성하고 `start()`만 호출한다. `OnvifDeviceClient`는 아직 main 실행 흐름에 직접 연결되어 있지 않다.
+
+임시 테스트라면 `server.start()` 이후에 `discoverOnce()`를 한 번 호출하고, 반환된 `xaddrs`로 `getDeviceInformation()`을 호출할 수 있다. 다만 이 방식은 startup 시점에 blocking network 작업을 수행하므로 운영 코드로 오래 두기에는 적합하지 않다.
+
+권장 방향은 Discovery와 DeviceClient를 묶는 별도 service를 추가하는 것이다.
+
+```text
+OnvifDiscoveryService
+  -> OnvifDiscoveredDevice.xaddrs 확보
+  -> OnvifDeviceClient.getDeviceInformation(xaddr)
+  -> DB 저장 또는 admin API 노출
+```
+
+## Network Test Notes
+
+ONVIF Discovery는 UDP multicast `239.255.255.250:3702`를 사용한다. 따라서 테스트 환경의 네트워크 계층이 multicast 송수신을 허용해야 한다.
+
+Linux Docker에서 실제 LAN 장비를 찾을 때는 일반 bridge network보다 host network가 단순하다.
+
+```bash
+docker run --rm -it --network host vms-image
+```
+
+Windows/WSL/Docker 계층에서는 multicast가 실제 LAN까지 전달되지 않거나 응답이 container까지 돌아오지 않을 수 있다. 이 경우 먼저 Windows host 도구나 WSL mirrored networking에서 직접 Discovery가 되는지 확인하는 편이 좋다.
+
+## Current Limitations
+
+- Device/Media 인증 미구현
+- Discovery 결과 DB 저장 미구현
+- `GetDeviceInformation` 결과의 application flow 연결 미구현
+- `GetCapabilities`, `GetProfiles`, `GetStreamUri` 미구현
+- 실제 카메라 대상 상호 운용 테스트 필요
