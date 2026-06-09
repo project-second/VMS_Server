@@ -9,8 +9,9 @@
 - WS-Discovery Resolve
 - ONVIF Device Service `GetDeviceInformation`
 - ONVIF Device Service `GetCapabilities`
+- WS-Security UsernameToken 인증: PasswordDigest, PasswordText
 
-아직 인증, DB 저장, Media Service 호출은 구현하지 않았다.
+아직 HTTP Digest 인증, DB 저장, Media Service 호출은 구현하지 않았다.
 
 ## Directory
 
@@ -48,13 +49,15 @@ devicemgmt.wsdl
 
 - `wsdl2h`
 - `soapcpp2`
-- `gsoap++`
-- gSOAP plugin: `wsddapi.c`, `wsaapi.c`
+- `gsoapssl++`
+- OpenSSL
+- gSOAP plugin/custom source: `wsddapi.c`, `wsaapi.c`, `wsseapi.c`, `smdevp.c`, `mecevp.c`, `struct_timeval.c`
 
 Discovery와 Device Service는 하나의 `onvif_services.h`로 통합 생성한다.
 
 ```cpp
 #import "wsdd.h"
+#import "wsse.h"
 #import "onvif_device.h"
 ```
 
@@ -96,6 +99,90 @@ discovery.stop();
 - UDP 3702 passive listener 실행
 - Hello 수신 시 장비 online/upsert
 - Bye 수신 시 장비 offline 처리
+
+`start()`를 사용하면 `discoverOnce()`처럼 결과를 바로 반환하지 않는다. 대신 서비스 내부의 장비 snapshot이 갱신되므로, 외부에서는 `devices()`로 현재 상태를 읽어 후속 Device Service 호출에 넘긴다.
+
+```cpp
+OnvifDiscoveryOptions options;
+options.interval = std::chrono::milliseconds(300000);
+
+OnvifDiscoveryService discovery(options);
+OnvifDeviceClient deviceClient;
+
+discovery.start();
+
+while (running) {
+    std::vector<OnvifDiscoveredDevice> devices = discovery.devices();
+
+    for (const OnvifDiscoveredDevice& device : devices) {
+        if (!device.online || device.xaddrs.empty()) {
+            continue;
+        }
+
+        const std::string& deviceServiceUrl = device.xaddrs.front();
+
+        std::optional<OnvifDeviceInformation> info =
+            deviceClient.getDeviceInformation(deviceServiceUrl);
+
+        std::optional<OnvifDeviceCapabilities> capabilities =
+            deviceClient.getCapabilities(deviceServiceUrl);
+
+        // TODO: cache update, DB upsert, admin API 노출
+    }
+
+    std::this_thread::sleep_for(std::chrono::minutes(5));
+}
+
+discovery.stop();
+```
+
+주의할 점은 매번 모든 장비에 `GetDeviceInformation`, `GetCapabilities`를 호출하면 장비에 불필요한 요청이 반복될 수 있다는 것이다. 운영 구조에서는 새로 발견된 장비나 metadata가 바뀐 장비만 조회하는 중간 service를 두는 편이 좋다.
+
+```cpp
+class OnvifDeviceProvisioningService {
+public:
+    OnvifDeviceProvisioningService(
+        OnvifDiscoveryService& discovery,
+        OnvifDeviceClient& deviceClient)
+        : discovery_(discovery),
+          deviceClient_(deviceClient) {}
+
+    void syncOnce() {
+        std::vector<OnvifDiscoveredDevice> devices = discovery_.devices();
+
+        for (const OnvifDiscoveredDevice& device : devices) {
+            if (!device.online || device.xaddrs.empty()) {
+                continue;
+            }
+
+            if (processedEndpointReferences_.find(device.endpointReference) !=
+                processedEndpointReferences_.end()) {
+                continue;
+            }
+
+            const std::string& deviceServiceUrl = device.xaddrs.front();
+
+            std::optional<OnvifDeviceInformation> info =
+                deviceClient_.getDeviceInformation(deviceServiceUrl);
+            std::optional<OnvifDeviceCapabilities> capabilities =
+                deviceClient_.getCapabilities(deviceServiceUrl);
+
+            if (!info || !capabilities) {
+                continue;
+            }
+
+            processedEndpointReferences_.insert(device.endpointReference);
+
+            // TODO: DB upsert 또는 application cache update
+        }
+    }
+
+private:
+    OnvifDiscoveryService& discovery_;
+    OnvifDeviceClient& deviceClient_;
+    std::set<std::string> processedEndpointReferences_;
+};
+```
 
 ## Resolve 사용법
 
@@ -172,6 +259,34 @@ std::optional<std::string> pickDeviceServiceUrl(const OnvifDiscoveredDevice& dev
 }
 ```
 
+## WS-Security UsernameToken 사용법
+
+인증이 필요한 장비는 `OnvifDeviceClientOptions`에 WS-Security UsernameToken 정보를 넣어 client를 생성한다. 기본 password type은 ONVIF에서 흔히 쓰는 `PasswordDigest`다.
+
+```cpp
+OnvifDeviceClientOptions options;
+options.wsSecurity.enabled = true;
+options.wsSecurity.username = "admin";
+options.wsSecurity.password = "password";
+options.wsSecurity.passwordType = OnvifWsSecurityPasswordType::Digest;
+options.wsSecurity.timestampLifetime = std::chrono::seconds(300);
+
+OnvifDeviceClient deviceClient(options);
+
+std::optional<OnvifDeviceInformation> info =
+    deviceClient.getDeviceInformation(deviceServiceUrl);
+std::optional<OnvifDeviceCapabilities> capabilities =
+    deviceClient.getCapabilities(deviceServiceUrl);
+```
+
+일부 장비가 `PasswordText`만 받는 경우에는 password type을 바꿀 수 있다. 단, `PasswordText`는 HTTPS 같은 보호된 전송과 함께 쓰는 것이 좋다.
+
+```cpp
+options.wsSecurity.passwordType = OnvifWsSecurityPasswordType::Text;
+```
+
+현재 WS-Security UsernameToken은 Device Service 호출에 적용된다. HTTP Digest 인증은 아직 구현하지 않았다.
+
 ## main.cpp 연결 방향
 
 현재 `src/main.cpp`는 `OnvifDiscoveryService`를 생성하고 `start()`만 호출한다. `OnvifDeviceClient`는 아직 main 실행 흐름에 직접 연결되어 있지 않다.
@@ -202,7 +317,7 @@ Windows/WSL/Docker 계층에서는 multicast가 실제 LAN까지 전달되지 �
 
 ## Current Limitations
 
-- Device/Media 인증 미구현
+- HTTP Digest 인증 미구현
 - Discovery 결과 DB 저장 미구현
 - `GetDeviceInformation`, `GetCapabilities` 결과의 application flow 연결 미구현
 - `GetProfiles`, `GetStreamUri` 미구현

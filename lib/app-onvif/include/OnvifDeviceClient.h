@@ -26,11 +26,27 @@ struct OnvifDeviceCapabilities {
     std::string ptzXAddr;
 };
 
-// Device Service SOAP 호출에 적용할 네트워크 timeout 설정이다.
+enum class OnvifWsSecurityPasswordType {
+    Text,
+    Digest,
+};
+
+// ONVIF Device/Media SOAP 호출에 붙일 WS-Security UsernameToken 설정이다.
+// 기본은 비활성화이며, ONVIF 장비는 보통 PasswordDigest 방식을 요구한다.
+struct OnvifWsSecurityOptions {
+    bool enabled = false;
+    std::string username;
+    std::string password;
+    OnvifWsSecurityPasswordType passwordType = OnvifWsSecurityPasswordType::Digest;
+    std::chrono::seconds timestampLifetime{300};
+};
+
+// Device Service SOAP 호출에 적용할 네트워크 timeout 및 인증 설정이다.
 struct OnvifDeviceClientOptions {
     std::chrono::seconds connectTimeout{3};
     std::chrono::seconds sendTimeout{5};
     std::chrono::seconds recvTimeout{5};
+    OnvifWsSecurityOptions wsSecurity;
 };
 
 // ONVIF Device Management Service를 호출하는 얇은 client wrapper다.
@@ -44,8 +60,7 @@ public:
 
     // Discovery의 XAddrs에서 얻은 Device Service URL로 GetDeviceInformation을 호출한다.
     // URL이 비어 있거나 SOAP fault/transport 오류가 발생하면 std::nullopt를 반환한다.
-    // 현재는 인증을 적용하지 않으므로 인증이 필요한 장비는 이후 HTTP Digest 또는
-    // WS-Security UsernameToken 처리가 추가되어야 한다.
+    // options.wsSecurity가 활성화되어 있으면 WS-Security UsernameToken을 함께 전송한다.
     std::optional<OnvifDeviceInformation> getDeviceInformation(const std::string& deviceServiceUrl) const;
 
     // Discovery의 XAddrs에서 얻은 Device Service URL로 GetCapabilities를 호출한다.
