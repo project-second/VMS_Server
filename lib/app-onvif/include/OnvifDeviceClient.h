@@ -15,6 +15,17 @@ struct OnvifDeviceInformation {
     std::string hardwareId;
 };
 
+// ONVIF Device Service의 GetCapabilities 응답 중 이후 service 호출에 필요한
+// endpoint URL만 추린 DTO다.
+struct OnvifDeviceCapabilities {
+    std::string analyticsXAddr;
+    std::string deviceXAddr;
+    std::string eventsXAddr;
+    std::string imagingXAddr;
+    std::string mediaXAddr;
+    std::string ptzXAddr;
+};
+
 // Device Service SOAP 호출에 적용할 네트워크 timeout 설정이다.
 struct OnvifDeviceClientOptions {
     std::chrono::seconds connectTimeout{3};
@@ -36,6 +47,11 @@ public:
     // 현재는 인증을 적용하지 않으므로 인증이 필요한 장비는 이후 HTTP Digest 또는
     // WS-Security UsernameToken 처리가 추가되어야 한다.
     std::optional<OnvifDeviceInformation> getDeviceInformation(const std::string& deviceServiceUrl) const;
+
+    // Discovery의 XAddrs에서 얻은 Device Service URL로 GetCapabilities를 호출한다.
+    // 응답의 Device/Media/Event/PTZ 등 service endpoint XAddr를 추려 반환한다.
+    // Media Service로 넘어갈 때는 보통 mediaXAddr를 다음 SOAP endpoint로 사용한다.
+    std::optional<OnvifDeviceCapabilities> getCapabilities(const std::string& deviceServiceUrl) const;
 
 private:
     OnvifDeviceClientOptions options_;

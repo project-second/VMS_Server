@@ -8,6 +8,7 @@
 - WS-Discovery passive listener: Hello, Bye 수신
 - WS-Discovery Resolve
 - ONVIF Device Service `GetDeviceInformation`
+- ONVIF Device Service `GetCapabilities`
 
 아직 인증, DB 저장, Media Service 호출은 구현하지 않았다.
 
@@ -140,8 +141,22 @@ for (const OnvifDiscoveredDevice& device : devices) {
     // info->firmwareVersion
     // info->serialNumber
     // info->hardwareId
+
+    std::optional<OnvifDeviceCapabilities> capabilities =
+        deviceClient.getCapabilities(deviceServiceUrl);
+
+    if (!capabilities) {
+        continue;
+    }
+
+    // capabilities->mediaXAddr
+    // capabilities->eventsXAddr
+    // capabilities->imagingXAddr
+    // capabilities->ptzXAddr
 }
 ```
+
+`GetCapabilities` 응답의 `mediaXAddr`는 이후 Media Service `GetProfiles`, `GetStreamUri` 호출 endpoint로 사용한다.
 
 실전에서는 `xaddrs.front()`를 바로 쓰기보다 접근 가능한 HTTP/HTTPS endpoint를 고르는 helper를 두는 편이 좋다.
 
@@ -169,6 +184,7 @@ std::optional<std::string> pickDeviceServiceUrl(const OnvifDiscoveredDevice& dev
 OnvifDiscoveryService
   -> OnvifDiscoveredDevice.xaddrs 확보
   -> OnvifDeviceClient.getDeviceInformation(xaddr)
+  -> OnvifDeviceClient.getCapabilities(xaddr)
   -> DB 저장 또는 admin API 노출
 ```
 
@@ -188,6 +204,6 @@ Windows/WSL/Docker 계층에서는 multicast가 실제 LAN까지 전달되지 �
 
 - Device/Media 인증 미구현
 - Discovery 결과 DB 저장 미구현
-- `GetDeviceInformation` 결과의 application flow 연결 미구현
-- `GetCapabilities`, `GetProfiles`, `GetStreamUri` 미구현
+- `GetDeviceInformation`, `GetCapabilities` 결과의 application flow 연결 미구현
+- `GetProfiles`, `GetStreamUri` 미구현
 - 실제 카메라 대상 상호 운용 테스트 필요

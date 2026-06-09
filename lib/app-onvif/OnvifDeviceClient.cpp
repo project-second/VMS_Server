@@ -5,7 +5,7 @@
 #include "LogSync.h"
 
 // soapH.h는 lib/app-onvif/onvif_services.h를 입력으로 soapcpp2가 생성한 header다.
-// 여기에는 Device Service 타입과 soap_call___tds__GetDeviceInformation 선언이 들어 있다.
+// 여기에는 Device Service 타입과 soap_call___tds__* 선언이 들어 있다.
 #include "soapH.h"
 
 // namespaces[]는 생성된 *.nsmap 파일이 정의하는 전역 namespace table이다.
@@ -16,6 +16,7 @@ extern struct Namespace namespaces[];
 namespace {
 
 constexpr const char* kGetDeviceInformationAction = "http://www.onvif.org/ver10/device/wsdl/GetDeviceInformation";
+constexpr const char* kGetCapabilitiesAction = "http://www.onvif.org/ver10/device/wsdl/GetCapabilities";
 
 std::unique_ptr<soap, void (*)(soap*)> makeSoapContext(const OnvifDeviceClientOptions& options) {
     // Device Service는 HTTP 기반 SOAP 호출이므로 기본 I/O context를 사용한다.
@@ -34,6 +35,36 @@ std::unique_ptr<soap, void (*)(soap*)> makeSoapContext(const OnvifDeviceClientOp
         soap_end(item);
         soap_free(item);
     }};
+}
+
+const char* soapFaultString(soap* context) {
+    const char** fault = soap_faultstring(context);
+    return fault != nullptr && *fault != nullptr ? *fault : "unknown SOAP fault";
+}
+
+OnvifDeviceCapabilities mapCapabilities(const tt__Capabilities& capabilities) {
+    OnvifDeviceCapabilities result;
+
+    if (capabilities.Analytics != nullptr) {
+        result.analyticsXAddr = capabilities.Analytics->XAddr;
+    }
+    if (capabilities.Device != nullptr) {
+        result.deviceXAddr = capabilities.Device->XAddr;
+    }
+    if (capabilities.Events != nullptr) {
+        result.eventsXAddr = capabilities.Events->XAddr;
+    }
+    if (capabilities.Imaging != nullptr) {
+        result.imagingXAddr = capabilities.Imaging->XAddr;
+    }
+    if (capabilities.Media != nullptr) {
+        result.mediaXAddr = capabilities.Media->XAddr;
+    }
+    if (capabilities.PTZ != nullptr) {
+        result.ptzXAddr = capabilities.PTZ->XAddr;
+    }
+
+    return result;
 }
 
 } // namespace
@@ -61,7 +92,7 @@ std::optional<OnvifDeviceInformation> OnvifDeviceClient::getDeviceInformation(
         response);
 
     if (result != SOAP_OK) {
-        LogSync::error("[ONVIF] GetDeviceInformation failed: ", *soap_faultstring(context.get()));
+        LogSync::error("[ONVIF] GetDeviceInformation failed: ", soapFaultString(context.get()));
         return std::nullopt;
     }
 
@@ -72,4 +103,38 @@ std::optional<OnvifDeviceInformation> OnvifDeviceClient::getDeviceInformation(
     info.serialNumber = response.SerialNumber;
     info.hardwareId = response.HardwareId;
     return info;
+}
+
+std::optional<OnvifDeviceCapabilities> OnvifDeviceClient::getCapabilities(
+    const std::string& deviceServiceUrl) const {
+    if (deviceServiceUrl.empty()) {
+        return std::nullopt;
+    }
+
+    auto context = makeSoapContext(options_);
+
+    _tds__GetCapabilities request;
+    _tds__GetCapabilitiesResponse response;
+
+    // 전체 capability를 요청한다. 응답에서 Media XAddr를 얻어 다음 Media Service 호출로 이어간다.
+    request.Category.push_back(tt__CapabilityCategory::All);
+
+    const int result = soap_call___tds__GetCapabilities(
+        context.get(),
+        deviceServiceUrl.c_str(),
+        kGetCapabilitiesAction,
+        &request,
+        response);
+
+    if (result != SOAP_OK) {
+        LogSync::error("[ONVIF] GetCapabilities failed: ", soapFaultString(context.get()));
+        return std::nullopt;
+    }
+
+    if (response.Capabilities == nullptr) {
+        LogSync::error("[ONVIF] GetCapabilities failed: empty Capabilities response");
+        return std::nullopt;
+    }
+
+    return mapCapabilities(*response.Capabilities);
 }
