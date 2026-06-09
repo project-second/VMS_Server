@@ -51,7 +51,7 @@ devicemgmt.wsdl
 - `soapcpp2`
 - `gsoapssl++`
 - OpenSSL
-- gSOAP plugin/custom source: `wsddapi.c`, `wsaapi.c`, `wsseapi.c`, `smdevp.c`, `mecevp.c`, `struct_timeval.c`
+- gSOAP plugin: `wsddapi.c`, `wsaapi.c`, `wsseapi.c`, `smdevp.c`, `mecevp.c`
 
 Discovery와 Device Service는 하나의 `onvif_services.h`로 통합 생성한다.
 
