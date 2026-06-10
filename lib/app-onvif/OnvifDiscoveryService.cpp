@@ -391,6 +391,30 @@ void OnvifDiscoveryService::markDeviceOffline(const std::string& endpointReferen
     }
 }
 
+void OnvifDiscoveryService::setDiscoveryInterval(std::chrono::milliseconds interval) {
+    options_.interval = interval;
+}
+
+void OnvifDiscoveryService::setListenTimeout(std::chrono::milliseconds timeout) {
+    options_.listenTimeout = timeout;
+}
+
+void OnvifDiscoveryService::setPassiveListenPollTimeout(std::chrono::milliseconds timeout) {
+    options_.passiveListenPollTimeout = timeout;
+}
+
+void OnvifDiscoveryService::setListenPort(int port) {
+    options_.listenPort = port;
+}
+
+void OnvifDiscoveryService::setPassiveListenPort(int port) {
+    options_.passiveListenPort = port;
+}
+
+void OnvifDiscoveryService::setOptions(OnvifDiscoveryOptions options) {
+    options_ = options;
+}
+
 // gSOAP WS-Discovery plugin이 요구하는 event handlers. 이름과 signature를 바꾸면 안 된다.
 void wsdd_event_Hello(soap* context, unsigned int, const char*, unsigned int, const char*, const char*,
     const char* EndpointReference, const char* Types, const char* Scopes, const char*, const char* XAddrs,

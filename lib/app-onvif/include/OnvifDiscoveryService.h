@@ -66,6 +66,13 @@ public:
     /// 마지막으로 수집한 장비 상태 snapshot을 반환한다.
     std::vector<OnvifDiscoveredDevice> devices() const;
 
+    void setDiscoveryInterval(std::chrono::milliseconds interval);
+    void setListenTimeout(std::chrono::milliseconds timeout);
+    void setPassiveListenPollTimeout(std::chrono::milliseconds timeout);
+    void setListenPort(int port);
+    void setPassiveListenPort(int port);
+    void setOptions(OnvifDiscoveryOptions options);
+
 private:
     friend struct OnvifDiscoveryEventAccess;
 

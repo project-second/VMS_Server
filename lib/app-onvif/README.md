@@ -10,9 +10,10 @@
 - ONVIF Device Service `GetDeviceInformation`
 - ONVIF Device Service `GetCapabilities`
 - ONVIF Media Service `GetProfiles`
+- ONVIF Media Service `GetStreamUri`
 - WS-Security UsernameToken 인증: PasswordDigest, PasswordText
 
-아직 HTTP Digest 인증, DB 저장, Media Service `GetStreamUri`는 구현하지 않았다.
+아직 HTTP Digest 인증, DB 저장, ONVIF 결과의 application flow 연결은 구현하지 않았다.
 
 ## Directory
 
@@ -253,7 +254,7 @@ for (const OnvifDiscoveredDevice& device : devices) {
 
 ## GetProfiles 사용법
 
-`GetProfiles`에는 `GetCapabilities`에서 얻은 `mediaXAddr`를 넘긴다. 응답의 `profile.token`은 다음 단계인 `GetStreamUri` 요청의 `ProfileToken`으로 사용한다.
+`GetProfiles`에는 `GetCapabilities`에서 얻은 `mediaXAddr`를 넘긴다. 응답의 `profile.token`은 `GetStreamUri` 요청의 `ProfileToken`으로 사용한다.
 
 ```cpp
 #include "OnvifDeviceClient.h"
@@ -286,12 +287,28 @@ for (const OnvifDiscoveredDevice& device : devices) {
     }
 
     for (const OnvifMediaProfile& profile : *profiles) {
+        std::optional<OnvifStreamUri> streamUri =
+            mediaClient.getStreamUri(capabilities->mediaXAddr, profile.token);
+
+        if (!streamUri) {
+            continue;
+        }
+
         // profile.token
         // profile.name
-        // profile.videoSourceConfigurationToken
-        // profile.videoEncoderConfigurationToken
+        // streamUri->uri: media-server 수신 서버에 넘길 RTSP/RTP URL
     }
 }
+```
+
+`getStreamUri()`의 기본값은 라이브 RTSP 수신에 흔히 쓰는 `RTP-Unicast over RTSP`다. 필요하면 stream type과 transport protocol을 명시할 수 있다.
+
+```cpp
+std::optional<OnvifStreamUri> streamUri = mediaClient.getStreamUri(
+    mediaXAddr,
+    profileToken,
+    OnvifMediaStreamType::RtpUnicast,
+    OnvifMediaTransportProtocol::Rtsp);
 ```
 
 WS-Security가 필요한 장비라면 Device client와 Media client에 같은 옵션을 넘기면 된다.
@@ -363,6 +380,7 @@ OnvifDiscoveryService
   -> OnvifDeviceClient.getCapabilities(xaddr)
   -> capabilities.mediaXAddr
   -> OnvifMediaClient.getProfiles(mediaXAddr)
+  -> OnvifMediaClient.getStreamUri(mediaXAddr, profileToken)
   -> DB 저장 또는 admin API 노출
 ```
 
@@ -384,5 +402,5 @@ Windows/WSL/Docker 계층에서는 multicast가 실제 LAN까지 전달되지 �
 - Discovery 결과 DB 저장 미구현
 - `GetDeviceInformation`, `GetCapabilities` 결과의 application flow 연결 미구현
 - `GetProfiles` 결과의 application flow 연결 미구현
-- `GetStreamUri` 미구현
+- `GetStreamUri` 결과의 application flow 연결 미구현
 - 실제 카메라 대상 상호 운용 테스트 필요
