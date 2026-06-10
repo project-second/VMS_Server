@@ -4,8 +4,9 @@ project(app-onvif LANGUAGES C CXX)
 
 set(ONVIF_GSOAP_INPUT ${CMAKE_CURRENT_SOURCE_DIR}/onvif_services.h)
 set(ONVIF_GSOAP_GENERATED_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
-set(ONVIF_DEVICE_HEADER ${ONVIF_GSOAP_GENERATED_DIR}/onvif_device.h)
+set(ONVIF_SERVICES_WSDL_HEADER ${ONVIF_GSOAP_GENERATED_DIR}/onvif_services_wsdl.h)
 set(ONVIF_DEVICE_WSDL ${CMAKE_CURRENT_SOURCE_DIR}/wsdl/ver10/device/wsdl/devicemgmt.wsdl)
+set(ONVIF_MEDIA_WSDL ${CMAKE_CURRENT_SOURCE_DIR}/wsdl/ver10/media/wsdl/media.wsdl)
 set(ONVIF_GSOAP_IMPORT_DIR /usr/share/gsoap/import CACHE PATH "gSOAP import directory")
 set(ONVIF_GSOAP_PLUGIN_DIR /usr/share/gsoap/plugin CACHE PATH "gSOAP plugin directory")
 set(ONVIF_GSOAP_CUSTOM_DIR /usr/share/gsoap/custom CACHE PATH "gSOAP custom source directory")
@@ -27,11 +28,12 @@ set(ONVIF_GSOAP_GENERATED_SOURCES
 )
 
 set(ONVIF_GSOAP_GENERATED_HEADERS
-    ${ONVIF_DEVICE_HEADER}
+    ${ONVIF_SERVICES_WSDL_HEADER}
     ${ONVIF_GSOAP_GENERATED_DIR}/soapH.h
     ${ONVIF_GSOAP_GENERATED_DIR}/soapStub.h
     ${ONVIF_GSOAP_GENERATED_DIR}/wsdd.nsmap
     ${ONVIF_GSOAP_GENERATED_DIR}/DeviceBinding.nsmap
+    ${ONVIF_GSOAP_GENERATED_DIR}/MediaBinding.nsmap
 )
 
 add_custom_command(
@@ -40,12 +42,13 @@ add_custom_command(
     COMMAND ${WSDL2H_EXECUTABLE}
         -c++17
         -x
-        -o ${ONVIF_DEVICE_HEADER}
+        -o ${ONVIF_SERVICES_WSDL_HEADER}
         -I ${ONVIF_GSOAP_IMPORT_DIR}
         -I ${CMAKE_CURRENT_SOURCE_DIR}/external
         -I ${CMAKE_CURRENT_SOURCE_DIR}/wsdl/ver10/schema
         -t ${ONVIF_GSOAP_TYPEMAP}
         ${ONVIF_DEVICE_WSDL}
+        ${ONVIF_MEDIA_WSDL}
     COMMAND ${SOAPCPP2_EXECUTABLE}
         -c++17
         -C
@@ -55,13 +58,15 @@ add_custom_command(
         -I ${ONVIF_GSOAP_IMPORT_DIR}:${ONVIF_GSOAP_GENERATED_DIR}
         ${ONVIF_GSOAP_INPUT}
     DEPENDS ${ONVIF_GSOAP_INPUT} ${ONVIF_WSDL_DEPENDENCIES}
-    COMMENT "Generating ONVIF gSOAP WS-Discovery and Device sources"
+    COMMENT "Generating ONVIF gSOAP WS-Discovery, Device, and Media sources"
     VERBATIM
 )
 
 add_library(${PROJECT_NAME} STATIC
     OnvifDiscoveryService.cpp
     OnvifDeviceClient.cpp
+    OnvifMediaClient.cpp
+    OnvifSoapContext.cpp
     ${ONVIF_GSOAP_GENERATED_SOURCES}
     ${ONVIF_GSOAP_PLUGIN_DIR}/wsddapi.c
     ${ONVIF_GSOAP_PLUGIN_DIR}/wsaapi.c

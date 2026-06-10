@@ -9,9 +9,10 @@
 - WS-Discovery Resolve
 - ONVIF Device Service `GetDeviceInformation`
 - ONVIF Device Service `GetCapabilities`
+- ONVIF Media Service `GetProfiles`
 - WS-Security UsernameToken 인증: PasswordDigest, PasswordText
 
-아직 HTTP Digest 인증, DB 저장, Media Service 호출은 구현하지 않았다.
+아직 HTTP Digest 인증, DB 저장, Media Service `GetStreamUri`는 구현하지 않았다.
 
 ## Directory
 
@@ -20,12 +21,17 @@ lib/app-onvif/
   CMakeLists.txt
   OnvifDiscoveryService.cpp
   OnvifDeviceClient.cpp
+  OnvifMediaClient.cpp
+  OnvifSoapContext.cpp
   onvif_services.h
   include/
+    OnvifClientOptions.h
     OnvifDiscoveryService.h
     OnvifDeviceClient.h
+    OnvifMediaClient.h
   wsdl/
     ver10/device/wsdl/devicemgmt.wsdl
+    ver10/media/wsdl/media.wsdl
     ver10/schema/*.xsd
   external/
     *.xsd
@@ -38,9 +44,9 @@ lib/app-onvif/
 상위 CMake에서 `add_subdirectory(lib/app-onvif)`로 포함된다. 이 모듈의 CMake는 빌드 중 다음 순서로 gSOAP 코드를 생성한다.
 
 ```text
-devicemgmt.wsdl
+devicemgmt.wsdl + media.wsdl
   -> wsdl2h
-  -> generated/onvif_device.h
+  -> generated/onvif_services_wsdl.h
   -> soapcpp2(onvif_services.h)
   -> generated/soapH.h, soapC.cpp, soapClient.cpp, *.nsmap
 ```
@@ -53,15 +59,15 @@ devicemgmt.wsdl
 - OpenSSL
 - gSOAP plugin: `wsddapi.c`, `wsaapi.c`, `wsseapi.c`, `smdevp.c`, `mecevp.c`
 
-Discovery와 Device Service는 하나의 `onvif_services.h`로 통합 생성한다.
+Discovery, Device Service, Media Service는 하나의 `onvif_services.h`로 통합 생성한다.
 
 ```cpp
 #import "wsdd.h"
 #import "wsse.h"
-#import "onvif_device.h"
+#import "onvif_services_wsdl.h"
 ```
 
-이렇게 묶는 이유는 Discovery와 Device를 따로 생성했을 때 `soapC.cpp` serializer symbol이 중복될 수 있기 때문이다.
+이렇게 묶는 이유는 Discovery, Device, Media를 따로 생성했을 때 `soapC.cpp` serializer symbol이 중복될 수 있기 때문이다.
 
 ## Discovery 사용법
 
@@ -245,6 +251,61 @@ for (const OnvifDiscoveredDevice& device : devices) {
 
 `GetCapabilities` 응답의 `mediaXAddr`는 이후 Media Service `GetProfiles`, `GetStreamUri` 호출 endpoint로 사용한다.
 
+## GetProfiles 사용법
+
+`GetProfiles`에는 `GetCapabilities`에서 얻은 `mediaXAddr`를 넘긴다. 응답의 `profile.token`은 다음 단계인 `GetStreamUri` 요청의 `ProfileToken`으로 사용한다.
+
+```cpp
+#include "OnvifDeviceClient.h"
+#include "OnvifDiscoveryService.h"
+#include "OnvifMediaClient.h"
+
+OnvifDiscoveryService discovery;
+OnvifDeviceClient deviceClient;
+OnvifMediaClient mediaClient;
+
+std::vector<OnvifDiscoveredDevice> devices = discovery.discoverOnce();
+
+for (const OnvifDiscoveredDevice& device : devices) {
+    if (device.xaddrs.empty()) {
+        continue;
+    }
+
+    std::optional<OnvifDeviceCapabilities> capabilities =
+        deviceClient.getCapabilities(device.xaddrs.front());
+
+    if (!capabilities || capabilities->mediaXAddr.empty()) {
+        continue;
+    }
+
+    std::optional<std::vector<OnvifMediaProfile>> profiles =
+        mediaClient.getProfiles(capabilities->mediaXAddr);
+
+    if (!profiles) {
+        continue;
+    }
+
+    for (const OnvifMediaProfile& profile : *profiles) {
+        // profile.token
+        // profile.name
+        // profile.videoSourceConfigurationToken
+        // profile.videoEncoderConfigurationToken
+    }
+}
+```
+
+WS-Security가 필요한 장비라면 Device client와 Media client에 같은 옵션을 넘기면 된다.
+
+```cpp
+OnvifClientOptions options;
+options.wsSecurity.enabled = true;
+options.wsSecurity.username = "admin";
+options.wsSecurity.password = "password";
+
+OnvifDeviceClient deviceClient(options);
+OnvifMediaClient mediaClient(options);
+```
+
 실전에서는 `xaddrs.front()`를 바로 쓰기보다 접근 가능한 HTTP/HTTPS endpoint를 고르는 helper를 두는 편이 좋다.
 
 ```cpp
@@ -285,11 +346,11 @@ std::optional<OnvifDeviceCapabilities> capabilities =
 options.wsSecurity.passwordType = OnvifWsSecurityPasswordType::Text;
 ```
 
-현재 WS-Security UsernameToken은 Device Service 호출에 적용된다. HTTP Digest 인증은 아직 구현하지 않았다.
+현재 WS-Security UsernameToken은 Device Service와 Media Service 호출에 적용된다. HTTP Digest 인증은 아직 구현하지 않았다.
 
 ## main.cpp 연결 방향
 
-현재 `src/main.cpp`는 `OnvifDiscoveryService`를 생성하고 `start()`만 호출한다. `OnvifDeviceClient`는 아직 main 실행 흐름에 직접 연결되어 있지 않다.
+현재 `src/main.cpp`는 `OnvifDiscoveryService`를 생성하고 `start()`만 호출한다. `OnvifDeviceClient`와 `OnvifMediaClient`는 아직 main 실행 흐름에 직접 연결되어 있지 않다.
 
 임시 테스트라면 `server.start()` 이후에 `discoverOnce()`를 한 번 호출하고, 반환된 `xaddrs`로 `getDeviceInformation()`을 호출할 수 있다. 다만 이 방식은 startup 시점에 blocking network 작업을 수행하므로 운영 코드로 오래 두기에는 적합하지 않다.
 
@@ -300,6 +361,8 @@ OnvifDiscoveryService
   -> OnvifDiscoveredDevice.xaddrs 확보
   -> OnvifDeviceClient.getDeviceInformation(xaddr)
   -> OnvifDeviceClient.getCapabilities(xaddr)
+  -> capabilities.mediaXAddr
+  -> OnvifMediaClient.getProfiles(mediaXAddr)
   -> DB 저장 또는 admin API 노출
 ```
 
@@ -320,5 +383,6 @@ Windows/WSL/Docker 계층에서는 multicast가 실제 LAN까지 전달되지 �
 - HTTP Digest 인증 미구현
 - Discovery 결과 DB 저장 미구현
 - `GetDeviceInformation`, `GetCapabilities` 결과의 application flow 연결 미구현
-- `GetProfiles`, `GetStreamUri` 미구현
+- `GetProfiles` 결과의 application flow 연결 미구현
+- `GetStreamUri` 미구현
 - 실제 카메라 대상 상호 운용 테스트 필요

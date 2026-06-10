@@ -1,7 +1,8 @@
 #ifndef ONVIF_DEVICE_CLIENT_H
 #define ONVIF_DEVICE_CLIENT_H
 
-#include <chrono>
+#include "OnvifClientOptions.h"
+
 #include <optional>
 #include <string>
 
@@ -26,28 +27,7 @@ struct OnvifDeviceCapabilities {
     std::string ptzXAddr;
 };
 
-enum class OnvifWsSecurityPasswordType {
-    Text,
-    Digest,
-};
-
-// ONVIF Device/Media SOAP 호출에 붙일 WS-Security UsernameToken 설정이다.
-// 기본은 비활성화이며, ONVIF 장비는 보통 PasswordDigest 방식을 요구한다.
-struct OnvifWsSecurityOptions {
-    bool enabled = false;
-    std::string username;
-    std::string password;
-    OnvifWsSecurityPasswordType passwordType = OnvifWsSecurityPasswordType::Digest;
-    std::chrono::seconds timestampLifetime{300};
-};
-
-// Device Service SOAP 호출에 적용할 네트워크 timeout 및 인증 설정이다.
-struct OnvifDeviceClientOptions {
-    std::chrono::seconds connectTimeout{3};
-    std::chrono::seconds sendTimeout{5};
-    std::chrono::seconds recvTimeout{5};
-    OnvifWsSecurityOptions wsSecurity;
-};
+using OnvifDeviceClientOptions = OnvifClientOptions;
 
 // ONVIF Device Management Service를 호출하는 얇은 client wrapper다.
 //
