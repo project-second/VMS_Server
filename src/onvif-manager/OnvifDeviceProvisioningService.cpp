@@ -28,7 +28,7 @@ void OnvifDeviceProvisioningService::provisioningLoop() {
         for (const auto& device : devices) {
             if (!device.online || device.xaddrs.empty()) { continue; }
 
-            futures.push_back(threadPool.submit(0, [&]() -> std::optional<ProvisioningResult> {
+            futures.push_back(threadPool.submit(0, [device]() -> std::optional<ProvisioningResult> {
                 const std::string xaddr = device.xaddrs.front();
 
                 OnvifDeviceClient deviceClient;
@@ -60,13 +60,13 @@ void OnvifDeviceProvisioningService::provisioningLoop() {
             }));
         }
 
-        std::vector<ProvisioningResult> ressults;
+        std::vector<ProvisioningResult> results;
 
         for (auto& future : futures) {
             try {
                 auto result = future.get();
                 if (result) {
-                    ressults.push_back(std::move(*result));
+                    results.push_back(std::move(*result));
                 }
             } catch (const std::exception& e) {
                 LogSync::error("[Provisioning] Exception in provisioning task: ", e.what());
@@ -75,7 +75,9 @@ void OnvifDeviceProvisioningService::provisioningLoop() {
             }
         }
 
-        // TODO 여기서 DB에 저장하거나 다른 시스템에 전달하는 등 프로비저닝 결과를 활용한다.
+        if (!results.empty() && !repository.upsert(results)) {
+            LogSync::error("[Provisioning] failed to upsert provisioning results");
+        }
 
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }

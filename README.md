@@ -97,6 +97,9 @@ dist/vms_server/
   bin/vms_server
   resources/application.yml
   resources/db/users.yml
+  resources/db/onvif.yml
+  db/README.md
+  db/migrations/001_core_schema.sql
 ```
 
 애플리케이션은 현재 작업 디렉터리 기준으로 `resources/application.yml`을 읽으므로, 설치 루트로 이동한 뒤 실행합니다.
@@ -114,21 +117,71 @@ cd dist/vms_server
 cpack --config build/CPackConfig.cmake
 ```
 
-기본 패키지 형식은 `TGZ`이며, 생성된 `.tar.gz` 파일에는 실행 파일과 `resources` 디렉터리가 함께 포함됩니다.
+기본 패키지 형식은 `TGZ`이며, 생성된 `.tar.gz` 파일에는 실행 파일, `resources` 디렉터리, DB migration용 `db` 디렉터리가 함께 포함됩니다.
 
 패키지를 풀고 실행하려면 다음과 같이 진행합니다.
 
 ```bash
 tar -xzf vms_server-0.1.0-Linux.tar.gz
 cd vms_server-0.1.0-Linux
+psql "postgresql://vms_user:veda1234@localhost:5432/vms_db" \
+  -f db/migrations/001_core_schema.sql
 ./bin/vms_server
 ```
+
+이미 migration이 적용된 DB라면 SQL 적용 단계는 생략할 수 있습니다. `001_core_schema.sql`은 `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS` 중심으로 작성되어 반복 적용에 비교적 안전하게 구성되어 있습니다.
 
 
 ## 데이터베이스 설정
 - USER: vms_user
 - PASSWORD: veda1234
 - DATABASE: vms_db
+
+### DB Migration 배포
+
+DB schema는 실행 파일에 내장하지 않고 SQL migration 파일로 배포합니다. CPack 패키지에는 다음 파일이 포함됩니다.
+
+```text
+db/README.md
+db/migrations/001_core_schema.sql
+```
+
+배포 대상 PostgreSQL에 schema를 적용하려면 패키지 루트에서 다음 명령을 실행합니다.
+
+```bash
+psql "postgresql://vms_user:veda1234@localhost:5432/vms_db" \
+  -f db/migrations/001_core_schema.sql
+```
+
+환경변수를 사용할 수도 있습니다.
+
+```bash
+export VMS_DB_CONNINFO="postgresql://vms_user:veda1234@localhost:5432/vms_db"
+psql "$VMS_DB_CONNINFO" -f db/migrations/001_core_schema.sql
+```
+
+현재 migration은 코드와 mapper가 사용하는 핵심 테이블을 생성합니다.
+
+- `users`, `user_approvals`, `roles`, `user_roles`
+- `devices`, `device_health`, `device_health_log`
+- `channels`, `profiles`
+
+ONVIF provisioning과 향후 bulk upsert를 위해 다음 unique/index도 함께 생성합니다.
+
+- `users(login_id)`
+- `roles(role_code)`
+- `devices(uuid)`
+- `channels(device_id, channel_no)`
+- `profiles(channel_id, onvif_profile_token)`
+
+배포 순서는 다음을 권장합니다.
+
+```text
+1. 패키지 압축 해제
+2. db/migrations/*.sql 적용
+3. resources/application.yml의 DB 연결 정보 확인
+4. ./bin/vms_server 실행
+```
 
 ## 애플리케이션 설정
 

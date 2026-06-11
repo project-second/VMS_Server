@@ -1,0 +1,163 @@
+mapper:
+  namespace: onvif
+  objects:
+    - id: getDeviceByUuid
+      sequence: select
+      query: >
+        SELECT
+          device_id,
+          uuid
+        FROM devices
+        WHERE uuid = #{uuid}
+        LIMIT 1
+
+    - id: insertDevice
+      sequence: insert
+      query: >
+        INSERT INTO devices (
+          type,
+          uuid,
+          addr,
+          name,
+          manufacturer,
+          model,
+          username,
+          password_enc,
+          created_at
+        ) VALUES (
+          #{type},
+          #{uuid},
+          #{addr},
+          #{name},
+          #{manufacturer},
+          #{model},
+          #{username},
+          #{password_enc},
+          NOW()
+        )
+
+    - id: updateDevice
+      sequence: update
+      query: >
+        UPDATE devices
+        SET
+          addr = #{addr},
+          name = #{name},
+          manufacturer = #{manufacturer},
+          model = #{model}
+        WHERE device_id = #{device_id}
+
+    - id: upsertDeviceHealth
+      sequence: insert
+      query: >
+        INSERT INTO device_health (
+          device_id,
+          online_state,
+          video_state,
+          rtt_ms,
+          rssi,
+          updated_at
+        ) VALUES (
+          #{device_id},
+          #{online_state},
+          #{video_state},
+          #{rtt_ms},
+          #{rssi},
+          NOW()
+        )
+        ON CONFLICT (device_id) DO UPDATE SET
+          online_state = EXCLUDED.online_state,
+          video_state = EXCLUDED.video_state,
+          rtt_ms = EXCLUDED.rtt_ms,
+          rssi = EXCLUDED.rssi,
+          updated_at = NOW()
+
+    - id: getChannelByDeviceAndNo
+      sequence: select
+      query: >
+        SELECT
+          channel_id,
+          device_id,
+          channel_no
+        FROM channels
+        WHERE device_id = #{device_id}
+          AND channel_no = #{channel_no}
+        LIMIT 1
+
+    - id: insertChannel
+      sequence: insert
+      query: >
+        INSERT INTO channels (
+          device_id,
+          channel_no,
+          name,
+          use_profile,
+          service_rtsp_url,
+          enabled
+        ) VALUES (
+          #{device_id},
+          #{channel_no},
+          #{name},
+          #{use_profile},
+          #{service_rtsp_url},
+          true
+        )
+
+    - id: updateChannel
+      sequence: update
+      query: >
+        UPDATE channels
+        SET
+          name = #{name},
+          use_profile = #{use_profile},
+          service_rtsp_url = #{service_rtsp_url},
+          enabled = true
+        WHERE channel_id = #{channel_id}
+
+    - id: getProfileByChannelAndToken
+      sequence: select
+      query: >
+        SELECT
+          profile_id,
+          channel_id,
+          onvif_profile_token
+        FROM profiles
+        WHERE channel_id = #{channel_id}
+          AND onvif_profile_token = #{onvif_profile_token}
+        LIMIT 1
+
+    - id: insertProfile
+      sequence: insert
+      query: >
+        INSERT INTO profiles (
+          channel_id,
+          profile_no,
+          name,
+          onvif_profile_token,
+          video_codec,
+          audio_codec,
+          cctv_rtsp_url,
+          enabled
+        ) VALUES (
+          #{channel_id},
+          #{profile_no},
+          #{name},
+          #{onvif_profile_token},
+          #{video_codec},
+          #{audio_codec},
+          #{cctv_rtsp_url},
+          true
+        )
+
+    - id: updateProfile
+      sequence: update
+      query: >
+        UPDATE profiles
+        SET
+          profile_no = #{profile_no},
+          name = #{name},
+          video_codec = #{video_codec},
+          audio_codec = #{audio_codec},
+          cctv_rtsp_url = #{cctv_rtsp_url},
+          enabled = true
+        WHERE profile_id = #{profile_id}

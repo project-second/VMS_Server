@@ -7,23 +7,13 @@
 #include "OnvifDiscoveryService.h"
 #include "OnvifDeviceClient.h"
 #include "OnvifMediaClient.h"
+#include "OnvifProvisioningRepository.h"
+#include "OnvifProvisioningTypes.h"
 
-struct OnvifProvisionedProfile {
-    OnvifMediaProfile profile;
-    std::optional<OnvifStreamUri> streamUri;
-};
-
-struct ProvisioningResult {
-    OnvifDiscoveredDevice discoveredDevice;
-
-    std::string deviceServiceUrl;
-    std::string mediaServiceUrl;
-
-    OnvifDeviceInformation deviceInformation;
-    OnvifDeviceCapabilities capabilities;
-
-    std::vector<OnvifProvisionedProfile> profiles;
-};
+#include <atomic>
+#include <memory>
+#include <thread>
+#include <vector>
 
 class OnvifDeviceProvisioningService {
 private:
@@ -31,6 +21,7 @@ private:
     OnvifDiscoveryService discoveryService;
 
     std::vector<std::unique_ptr<OnvifDeviceClient>> deviceClients;
+    OnvifProvisioningRepository repository;
 
     std::thread provisioningThread;
     std::atomic<bool> running{false};
