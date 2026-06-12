@@ -5,19 +5,26 @@ OnvifDeviceProvisioningService::OnvifDeviceProvisioningService(ThreadPool& tp, i
     discoveryService.setDiscoveryInterval(std::chrono::milliseconds(discoveryIntervalMs));
 }
 
-OnvifDeviceProvisioningService::~OnvifDeviceProvisioningService() {}
+OnvifDeviceProvisioningService::~OnvifDeviceProvisioningService() {
+    stop();
+}
 
 void OnvifDeviceProvisioningService::start() {
+    if (running.exchange(true)) {
+        return;
+    }
     discoveryService.start();
 
-    running.store(true);
-    provisioningThread = std::thread([this]() { provisioningLoop();});
-
-    discoveryService.devices();
+    provisioningThread = std::thread([this]() { provisioningLoop(); });
 }
 
 void OnvifDeviceProvisioningService::stop() {
+    running.store(false);
     discoveryService.stop();
+
+    if (provisioningThread.joinable()) {
+        provisioningThread.join();
+    }
 }
 
 void OnvifDeviceProvisioningService::provisioningLoop() {
