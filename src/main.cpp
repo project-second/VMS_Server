@@ -14,7 +14,7 @@
 
 int main(int argc, char const* argv[]) {
     AppRuntimeConfig config;
-    if (!loadApplicationConfig(config, "resources", "application.yml")) {
+    if (!loadApplicationConfig(config, "../resources", "application.yml")) {
         return 1;
     }
 

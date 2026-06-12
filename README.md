@@ -95,6 +95,7 @@ cmake --install build --prefix dist/vms_server
 ```text
 dist/vms_server/
   bin/vms_server
+  lib/*.so*
   resources/application.yml
   resources/db/users.yml
   resources/db/onvif.yml
@@ -117,7 +118,7 @@ cd dist/vms_server
 cpack --config build/CPackConfig.cmake
 ```
 
-기본 패키지 형식은 `TGZ`이며, 생성된 `.tar.gz` 파일에는 실행 파일, `resources` 디렉터리, DB migration용 `db` 디렉터리가 함께 포함됩니다.
+기본 패키지 형식은 `TGZ`이며, 생성된 `.tar.gz` 파일에는 실행 파일, 런타임 shared library용 `lib` 디렉터리, `resources` 디렉터리, DB migration용 `db` 디렉터리가 함께 포함됩니다. 설치된 실행 파일은 `$ORIGIN/../lib` RUNPATH를 사용하므로, 패키지 내부 `lib/*.so*`를 우선 찾습니다.
 
 패키지를 풀고 실행하려면 다음과 같이 진행합니다.
 

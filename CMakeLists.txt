@@ -41,9 +41,40 @@ target_link_libraries(${PROJECT_NAME} PRIVATE
     app-media-server
 )
 
+set_target_properties(${PROJECT_NAME} PROPERTIES
+    INSTALL_RPATH "$ORIGIN/../lib"
+)
+
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
+
+install(CODE [[
+    file(GET_RUNTIME_DEPENDENCIES
+        EXECUTABLES "$<TARGET_FILE:vms_server>"
+        RESOLVED_DEPENDENCIES_VAR resolved_deps
+        UNRESOLVED_DEPENDENCIES_VAR unresolved_deps
+        POST_EXCLUDE_REGEXES
+            "/lib.*/ld-linux.*"
+            "/lib.*/libc\\.so.*"
+            "/lib.*/libm\\.so.*"
+            "/lib.*/libpthread\\.so.*"
+            "/lib.*/librt\\.so.*"
+            "/lib.*/libdl\\.so.*"
+    )
+
+    foreach(dep IN LISTS resolved_deps)
+        file(INSTALL
+            DESTINATION "${CMAKE_INSTALL_PREFIX}/lib"
+            TYPE SHARED_LIBRARY
+            FOLLOW_SYMLINK_CHAIN
+            FILES "${dep}")
+    endforeach()
+
+    if(unresolved_deps)
+        message(WARNING "Unresolved runtime dependencies: ${unresolved_deps}")
+    endif()
+]])
 
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/resources
     DESTINATION .
