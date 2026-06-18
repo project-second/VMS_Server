@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+class VmsAdminRepository;
+
 class VmsAdminService {
 public:
     enum class AdminCheckStatus {
@@ -60,6 +62,7 @@ public:
 
 public:
     VmsAdminService();
+    explicit VmsAdminService(VmsAdminRepository& adminRepository);
     ~VmsAdminService();
 
     AdminCheckStatus checkAdmin(std::int64_t userId);
@@ -74,6 +77,9 @@ public:
     MutationStatus addUserRole(std::int64_t userId, std::int64_t adminUserId, const std::string& roleCode);
     MutationStatus deleteUserRole(std::int64_t userId, const std::string& roleCode);
     MutationStatus updateUserActiveStatus(std::int64_t userId, bool isActive);
+
+private:
+    VmsAdminRepository& adminRepository;
 };
 
 #endif // __VMSADMINSERVICE_H__

@@ -5,8 +5,10 @@
 #include "OnvifDeviceProvisioningService.h"
 #include "ThreadPool.hpp"
 #include "VmsAdminController.h"
+#include "VmsAdminRepository.h"
 #include "VmsAdminService.h"
 #include "VmsUserController.h"
+#include "VmsUserRepository.h"
 #include "VmsUserService.h"
 
 #include <chrono>
@@ -25,8 +27,10 @@ int main(int argc, char const* argv[]) {
     AppDb::configure(config.dbConninfo, config.dbMapperPath);
 
     HttpServer server(serverHost, port, server_threads);
-    VmsUserService userService;
-    VmsAdminService adminService;
+    VmsUserRepository userRepository;
+    VmsUserService userService(userRepository);
+    VmsAdminRepository adminRepository;
+    VmsAdminService adminService(adminRepository);
     VmsUserController userController(server, userService);
     VmsAdminController adminController(server, adminService, userService);
 

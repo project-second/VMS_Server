@@ -5,6 +5,8 @@
 #include <string>
 #include <vector>
 
+class VmsUserRepository;
+
 class VmsUserService {
 public:
     enum class LoginStatus {
@@ -101,6 +103,7 @@ public:
 
 public:
     VmsUserService();
+    explicit VmsUserService(VmsUserRepository& userRepository);
     ~VmsUserService();
 
     LoginResult login(const std::string& loginId, const std::string& pw);
@@ -115,6 +118,9 @@ public:
         const std::string& name,
         const std::string& newPassword);
     DeleteStatus deleteUser(std::int64_t userId, const std::string& currentPassword);
+
+private:
+    VmsUserRepository& userRepository;
 };
 
 #endif // __VMSUSERSERVICE_H__
