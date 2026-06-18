@@ -57,6 +57,8 @@ CREATE TABLE IF NOT EXISTS devices (
     type smallint NOT NULL,
     uuid varchar(128) NOT NULL,
     addr varchar(128),
+    media_xaddr varchar(256),
+    ptz_xaddr varchar(256),
     name varchar(128),
     manufacturer varchar(128),
     model varchar(128),
@@ -116,6 +118,67 @@ CREATE TABLE IF NOT EXISTS profiles (
 CREATE UNIQUE INDEX IF NOT EXISTS uq_profiles_channel_token
     ON profiles (channel_id, onvif_profile_token)
     WHERE onvif_profile_token IS NOT NULL AND onvif_profile_token <> '';
+
+CREATE TABLE IF NOT EXISTS ptz_capabilities (
+    channel_id bigint PRIMARY KEY REFERENCES channels(channel_id) ON DELETE CASCADE,
+    supports_pan boolean,
+    supports_tilt boolean,
+    supports_zoom boolean,
+    supports_preset boolean,
+    supports_tour boolean,
+    supports_linear boolean,
+    min_pan numeric(8,4),
+    max_pan numeric(8,4),
+    min_tilt numeric(8,4),
+    max_tilt numeric(8,4),
+    min_zoom numeric(8,4),
+    max_zoom numeric(8,4)
+);
+
+CREATE TABLE IF NOT EXISTS ptz_preset (
+    preset_id bigserial PRIMARY KEY,
+    channel_id bigint NOT NULL REFERENCES channels(channel_id) ON DELETE CASCADE,
+    preset_token varchar(128),
+    preset_name varchar(128),
+    pan numeric(8,4),
+    tilt numeric(8,4),
+    zoom numeric(8,4),
+    linear numeric(8,4),
+    created_at timestamptz NOT NULL DEFAULT NOW(),
+    updated_at timestamptz
+);
+
+CREATE INDEX IF NOT EXISTS ix_ptz_preset_channel
+    ON ptz_preset (channel_id, preset_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ptz_preset_channel_token
+    ON ptz_preset (channel_id, preset_token)
+    WHERE preset_token IS NOT NULL AND preset_token <> '';
+
+CREATE TABLE IF NOT EXISTS ptz_tours (
+    tour_id bigserial PRIMARY KEY,
+    channel_id bigint NOT NULL REFERENCES channels(channel_id) ON DELETE CASCADE,
+    tour_name varchar(128),
+    repeat_mode varchar(32),
+    schedule_enabled boolean,
+    is_enabled boolean,
+    created_at timestamptz NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS ix_ptz_tours_channel
+    ON ptz_tours (channel_id, tour_id);
+
+CREATE TABLE IF NOT EXISTS ptz_tours_items (
+    tour_item_id bigserial PRIMARY KEY,
+    tour_id bigint NOT NULL REFERENCES ptz_tours(tour_id) ON DELETE CASCADE,
+    preset_id bigint NOT NULL REFERENCES ptz_preset(preset_id) ON DELETE CASCADE,
+    seq_no integer,
+    stay_seconds integer,
+    move_speed numeric(5,2)
+);
+
+CREATE INDEX IF NOT EXISTS ix_ptz_tours_items_tour_seq
+    ON ptz_tours_items (tour_id, seq_no, tour_item_id);
 
 INSERT INTO roles (role_code, role_name) VALUES
     ('ADMIN', 'Administrator'),

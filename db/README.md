@@ -42,6 +42,10 @@ CPack 패키지에는 `resources/`와 함께 `db/` 디렉터리가 포함된다.
 - device_health_log
 - channels
 - profiles
+- ptz_capabilities
+- ptz_preset
+- ptz_tours
+- ptz_tours_items
 
 ONVIF provisioning bulk upsert를 위해 다음 unique constraint도 포함한다.
 
@@ -50,6 +54,7 @@ ONVIF provisioning bulk upsert를 위해 다음 unique constraint도 포함한�
 - `devices(uuid)`
 - `channels(device_id, channel_no)`
 - `profiles(channel_id, onvif_profile_token)`
+- `ptz_preset(channel_id, preset_token)`
 
 ## 주의 사항
 
