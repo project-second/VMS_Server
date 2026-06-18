@@ -34,6 +34,8 @@ bool applySecurity(soap* context, const OnvifPtzClientOptions& options, const ch
     return false;
 }
 
+// ONVIF ContinuousMove는 pan/tilt와 zoom 속도를 tt__PTZSpeed 안의 선택 필드로 보낸다.
+// 0 값인 축은 요청에서 생략해 장비가 기존 이동 상태를 유지할 수 있게 한다.
 tt__PTZSpeed* makeVelocity(soap* context, float pan, float tilt, float zoom) {
     tt__PTZSpeed* velocity = soap_new_tt__PTZSpeed(context);
     if (velocity == nullptr) {

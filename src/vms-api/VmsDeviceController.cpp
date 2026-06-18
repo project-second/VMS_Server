@@ -1,13 +1,15 @@
 #include "VmsDeviceController.h"
 
-VmsDeviceController::VmsDeviceController(HttpServer& server) : httpServer(server) {}
+#include "VmsApiResponses.h"
+#include "VmsRequestHelpers.h"
 
-VmsDeviceController::~VmsDeviceController() {
+VmsDeviceController::VmsDeviceController(HttpServer& server, VmsDeviceService& deviceService)
+    : httpServer(server), deviceService(deviceService) {
     handleGetDeviceList();
     handleChangeDeviceName();
     handleGetDeviceChannelList();
     handleChannelPanControl();
-    handleChannelTiltControl();;
+    handleChannelTiltControl();
     handleChannelLinearControl();
     handleChannelStopControl();
     handleGetChannelPresetList();
@@ -24,107 +26,114 @@ VmsDeviceController::~VmsDeviceController() {
     handleDeleteChannelTour();
 }
 
+VmsDeviceController::~VmsDeviceController() {}
+
+// GET /devices
+// 장비 목록 조회 API. paging query를 검증한 뒤 DB의 장비 목록을 반환한다.
 void VmsDeviceController::handleGetDeviceList() {
-httpServer.addRoute(HttpMethod::GET, "/devices", [this](const Http::Request& req) -> Http::Response {   
+httpServer.addRoute(HttpMethod::GET, "/devices", [this](const Http::Request& req) -> Http::Response {
     int page = 1;
     int size = 10;
 
-    if (const auto* v = req.getQueryParam("page")) { page = std::stoi(*v); }
+    if (const auto* v = req.getQueryParam("page")) {
+        if (!VmsRequest::parsePositiveInt(*v, page)) return VmsApiResponse::invalidArgumentResponse();
+    }
+    if (const auto* v = req.getQueryParam("size")) {
+        if (!VmsRequest::parsePositiveInt(*v, size)) return VmsApiResponse::invalidArgumentResponse();
+    }
 
-    if (const auto* v = req.getQueryParam("size")) { size = std::stoi(*v); }
+    const auto result = deviceService.getDeviceList(page, size);
+    if (result.status != VmsDeviceService::ListStatus::Success) {
+        return VmsApiResponse::internalServerErrorResponse();
+    }
 
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", json::array({
-            {
-                {"deviceId", "11"},
-                {"name", "Camera 1"},
-                {"type", "CCTV"},
-                {"ip", "192.168.1.101"},
-                {"model", "Model X"},
-                {"online", true},
-                {"health", "DOWN"},
-                {"channelCount", 4}
-            },
-            {
-                {"deviceId", "12"},
-                {"name", "Camera 2"},
-                {"type", "CCTV"},
-                {"ip", "192.168.1.102"},
-                {"model", "Model Y"},
-                {"online", false},
-                {"health", "DOWN"},
-                {"channelCount", 4}
-            }
-        }),
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    json devices = json::array();
+    for (const auto& item : result.items) {
+        devices.push_back({
+            {"deviceId", item.deviceId},
+            {"name", item.name},
+            {"type", item.type},
+            {"ip", item.ip},
+            {"model", item.model},
+            {"online", item.online},
+            {"health", item.health},
+            {"channelCount", item.channelCount}
+        });
+    }
+
+    return VmsApiResponse::successResponse(devices);
 });
 }
 
+// POST /devices/{deviceId}
+// 장비 이름 변경 API. request body의 name을 검증하고 DB에 반영한다.
 void VmsDeviceController::handleChangeDeviceName() {
 httpServer.addRoute(HttpMethod::POST, "/devices/{deviceId}", [this](const Http::Request& req) -> Http::Response {
-    const std::string* deviceId = req.getPathParam("deviceId");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"deviceId", *deviceId},
-            {"name", "newName"},
-            {"updatedAt", "2024-06-01T12:00:00Z"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t deviceId = 0;
+    if (!VmsRequest::parsePathInt64(req, "deviceId", deviceId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto requestBody = VmsRequest::parseJsonObject(req);
+    if (!requestBody
+        || !requestBody->contains("name")
+        || !(*requestBody)["name"].is_string()) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.changeDeviceName(deviceId, (*requestBody)["name"].get<std::string>());
+    if (result.status == VmsDeviceService::MutationStatus::InvalidArgument) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+    if (result.status == VmsDeviceService::MutationStatus::NotFound) {
+        return VmsApiResponse::notFoundResponse();
+    }
+    if (result.status != VmsDeviceService::MutationStatus::Success) {
+        return VmsApiResponse::internalServerErrorResponse();
+    }
+
+    return VmsApiResponse::successResponse({
+        {"deviceId", result.deviceId},
+        {"name", result.name}
+    });
 });
 }
 
+// GET /devices/{deviceId}/channels
+// 특정 장비에 속한 채널 목록 조회 API. channels/profiles 테이블 기준으로 반환한다.
 void VmsDeviceController::handleGetDeviceChannelList() {
 httpServer.addRoute(HttpMethod::GET, "/devices/{deviceId}/channels", [this](const Http::Request& req) -> Http::Response {
-    const std::string* deviceId = req.getPathParam("deviceId");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", json::array({
-            {
-                {"channelId", 101},
-                {"channelNo", 0},
-                {"name", "CH1"},
-                {"videoCodec", "H264"},
-                {"audioCodec", "AAC"},
-                {"rtsp", "rtsp://192.168.0.69:554/0/onvif/profile1/media.smp"}
-            },
-            {
-                {"channelId", 102},
-                {"channelNo", 1},
-                {"name", "CH2"},
-                {"videoCodec", "H264"},
-                {"audioCodec", "AAC"},
-                {"rtsp", "rtsp://192.168.0.69:554/0/onvif/profile1/media.smp"}
-            }
-        }),
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t deviceId = 0;
+    if (!VmsRequest::parsePathInt64(req, "deviceId", deviceId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.getDeviceChannelList(deviceId);
+    if (result.status == VmsDeviceService::ListStatus::NotFound) {
+        return VmsApiResponse::notFoundResponse();
+    }
+    if (result.status != VmsDeviceService::ListStatus::Success) {
+        return VmsApiResponse::internalServerErrorResponse();
+    }
+
+    json channels = json::array();
+    for (const auto& item : result.items) {
+        channels.push_back({
+            {"channelId", item.channelId},
+            {"channelNo", item.channelNo},
+            {"name", item.name},
+            {"videoCodec", item.videoCodec},
+            {"audioCodec", item.audioCodec},
+            {"rtsp", item.rtsp}
+        });
+    }
+
+    return VmsApiResponse::successResponse(channels);
 });
 }
 
+// POST /channels/{channelId}/ptz/pan
+// 채널의 pan 연속 이동 API. 추후 channelId로 ptzXAddr/profileToken을 찾고 OnvifPtzClient::continuousMove를 호출한다.
 void VmsDeviceController::handleChannelPanControl() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/pan", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -145,6 +154,8 @@ httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/pan", [this](co
 });
 }
 
+// POST /channels/{channelId}/ptz/tilt
+// 채널의 tilt 연속 이동 API. pan과 동일하게 OnvifPtzClient::continuousMove로 연결한다.
 void VmsDeviceController::handleChannelTiltControl() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tilt", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -165,6 +176,8 @@ httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tilt", [this](c
 });
 }
 
+// POST /channels/{channelId}/ptz/linear
+// pan/tilt/zoom을 한 번에 전달하는 PTZ 이동 API로 사용할 수 있는 route다.
 void VmsDeviceController::handleChannelLinearControl() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/linear", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -185,6 +198,8 @@ httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/linear", [this]
 });
 }
 
+// POST /channels/{channelId}/ptz/stop
+// 진행 중인 PTZ 이동 중지 API. 추후 OnvifPtzClient::stop과 연결한다.
 void VmsDeviceController::handleChannelStopControl() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/stop", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -205,6 +220,8 @@ httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/stop", [this](c
 });
 }
 
+// GET /channels/{channelId}/ptz/presets
+// 채널 PTZ preset 목록 조회 API. 추후 OnvifPtzClient::getPresets 또는 DB cache 조회와 연결한다.
 void VmsDeviceController::handleGetChannelPresetList() {
 httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/presets", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -244,6 +261,8 @@ httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/presets", [this]
 });
 }
 
+// POST /channels/{channelId}/ptz/presets
+// 현재 PTZ 위치를 preset으로 저장하는 API. 추후 OnvifPtzClient::setPreset으로 연결한다.
 void VmsDeviceController::handleSetChannelPreset() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/presets", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -264,6 +283,8 @@ httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/presets", [this
 });
 }
 
+// POST /channels/{channelId}/ptz/presets/{presetId}/goto
+// 저장된 preset 위치로 이동하는 API. VMS presetId를 ONVIF presetToken으로 변환해야 한다.
 void VmsDeviceController::handleGoToChannelPreset() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/presets/{presetId}/goto", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -285,6 +306,8 @@ httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/presets/{preset
 });
 }
 
+// PUT /channels/{channelId}/ptz/presets/{presetId}
+// preset 이름/메타데이터 갱신 API. 장비 preset 갱신과 VMS DB 갱신 범위를 결정해야 한다.
 void VmsDeviceController::handleUpdateChannelPreset() {
 httpServer.addRoute(HttpMethod::PUT, "/channels/{channelId}/ptz/presets/{presetId}", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -306,6 +329,8 @@ httpServer.addRoute(HttpMethod::PUT, "/channels/{channelId}/ptz/presets/{presetI
 });
 }
 
+// DELETE /channels/{channelId}/ptz/presets/{presetId}
+// preset 삭제 API. 추후 OnvifPtzClient::removePreset과 DB 삭제를 함께 처리한다.
 void VmsDeviceController::handleDeleteChannelPreset() {
 httpServer.addRoute(HttpMethod::DELETE, "/channels/{channelId}/ptz/presets/{presetId}", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -327,6 +352,8 @@ httpServer.addRoute(HttpMethod::DELETE, "/channels/{channelId}/ptz/presets/{pres
 });
 }
 
+// GET /channels/{channelId}/ptz/tours
+// 채널 preset tour 목록 조회 API. 현재는 샘플 응답이며, app-onvif preset tour wrapper는 아직 없다.
 void VmsDeviceController::handleGetChannelTourList() {
 httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/tours", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -358,6 +385,8 @@ httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/tours", [this](c
 });
 }
 
+// POST /channels/{channelId}/ptz/tours
+// preset tour 생성 API. 추후 ONVIF CreatePresetTour 또는 VMS 내부 tour 저장 정책과 연결한다.
 void VmsDeviceController::handleCreateChannelTour() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -378,6 +407,8 @@ httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours", [this](
 });
 }
 
+// GET /channels/{channelId}/ptz/tours/{tourId}
+// preset tour 상세 조회 API. tour item 순서, 체류 시간, 이동 속도 정보를 반환한다.
 void VmsDeviceController::handleGetChannelTourInfo() {
 httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/tours/{tourId}", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -420,6 +451,8 @@ httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/tours/{tourId}",
 });
 }
 
+// POST /channels/{channelId}/ptz/tours/{tourId}/start
+// preset tour 시작 API. 추후 ONVIF OperatePresetTour Start와 연결한다.
 void VmsDeviceController::handleStartChannelTour() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours/{tourId}/start", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -441,6 +474,8 @@ httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours/{tourId}/
 });
 }
 
+// POST /channels/{channelId}/ptz/tours/{tourId}/stop
+// preset tour 중지 API. 추후 ONVIF OperatePresetTour Stop과 연결한다.
 void VmsDeviceController::handleStopChannelTour() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours/{tourId}/stop", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -462,6 +497,8 @@ httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours/{tourId}/
 });
 }
 
+// PUT /channels/{channelId}/ptz/tours/{tourId}
+// preset tour 이름/반복 조건/item 구성 갱신 API.
 void VmsDeviceController::handleUpdateChannelTourInfo() {
 httpServer.addRoute(HttpMethod::PUT, "/channels/{channelId}/ptz/tours/{tourId}", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");
@@ -483,6 +520,8 @@ httpServer.addRoute(HttpMethod::PUT, "/channels/{channelId}/ptz/tours/{tourId}",
 });
 }
 
+// DELETE /channels/{channelId}/ptz/tours/{tourId}
+// preset tour 삭제 API. 추후 ONVIF RemovePresetTour 또는 VMS DB 삭제와 연결한다.
 void VmsDeviceController::handleDeleteChannelTour() {
 httpServer.addRoute(HttpMethod::DELETE, "/channels/{channelId}/ptz/tours/{tourId}", [this](const Http::Request& req) -> Http::Response {
     const std::string* channelNo = req.getPathParam("channelNo");

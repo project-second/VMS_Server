@@ -1,0 +1,98 @@
+mapper:
+  namespace: devices
+  objects:
+    - id: listDevices
+      sequence: select
+      query: >
+        SELECT
+          d.device_id,
+          d.type,
+          d.addr,
+          d.name,
+          d.model,
+          COALESCE(dh.online_state, 0) AS online_state,
+          COALESCE(dh.video_state, 0) AS video_state,
+          COUNT(c.channel_id) AS channel_count
+        FROM devices d
+        LEFT JOIN device_health dh ON dh.device_id = d.device_id
+        LEFT JOIN channels c ON c.device_id = d.device_id
+          AND c.enabled = true
+        GROUP BY
+          d.device_id,
+          d.type,
+          d.addr,
+          d.name,
+          d.model,
+          dh.online_state,
+          dh.video_state
+        ORDER BY d.device_id
+        LIMIT #{limit}
+        OFFSET #{offset}
+
+    - id: getDeviceById
+      sequence: select
+      query: >
+        SELECT
+          d.device_id,
+          d.type,
+          d.addr,
+          d.name,
+          d.model,
+          COALESCE(dh.online_state, 0) AS online_state,
+          COALESCE(dh.video_state, 0) AS video_state,
+          COUNT(c.channel_id) AS channel_count
+        FROM devices d
+        LEFT JOIN device_health dh ON dh.device_id = d.device_id
+        LEFT JOIN channels c ON c.device_id = d.device_id
+          AND c.enabled = true
+        WHERE d.device_id = #{device_id}
+        GROUP BY
+          d.device_id,
+          d.type,
+          d.addr,
+          d.name,
+          d.model,
+          dh.online_state,
+          dh.video_state
+        LIMIT 1
+
+    - id: updateDeviceName
+      sequence: update
+      query: >
+        UPDATE devices
+        SET name = #{name}
+        WHERE device_id = #{device_id}
+
+    - id: listDeviceChannels
+      sequence: select
+      query: >
+        SELECT
+          c.channel_id,
+          c.channel_no,
+          c.name,
+          p.video_codec,
+          p.audio_codec,
+          COALESCE(c.service_rtsp_url, p.cctv_rtsp_url) AS rtsp
+        FROM channels c
+        LEFT JOIN LATERAL (
+          SELECT
+            profile_id,
+            video_codec,
+            audio_codec,
+            cctv_rtsp_url
+          FROM profiles
+          WHERE channel_id = c.channel_id
+            AND enabled = true
+          ORDER BY
+            CASE
+              WHEN c.use_profile IS NOT NULL
+                AND profile_no = c.use_profile THEN 0
+              ELSE 1
+            END,
+            profile_no,
+            profile_id
+          LIMIT 1
+        ) p ON true
+        WHERE c.device_id = #{device_id}
+          AND c.enabled = true
+        ORDER BY c.channel_no, c.channel_id

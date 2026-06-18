@@ -7,6 +7,9 @@
 #include "VmsAdminController.h"
 #include "VmsAdminRepository.h"
 #include "VmsAdminService.h"
+#include "VmsDeviceController.h"
+#include "VmsDeviceRepository.h"
+#include "VmsDeviceService.h"
 #include "VmsUserController.h"
 #include "VmsUserRepository.h"
 #include "VmsUserService.h"
@@ -31,8 +34,11 @@ int main(int argc, char const* argv[]) {
     VmsUserService userService(userRepository);
     VmsAdminRepository adminRepository;
     VmsAdminService adminService(adminRepository);
+    VmsDeviceRepository deviceRepository;
+    VmsDeviceService deviceService(deviceRepository);
     VmsUserController userController(server, userService);
     VmsAdminController adminController(server, adminService, userService);
+    VmsDeviceController deviceController(server, deviceService);
 
     ThreadPool onvifThreadPool;
     OnvifDeviceProvisioningService onvifProvisioning(
