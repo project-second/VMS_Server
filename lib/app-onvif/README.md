@@ -11,9 +11,15 @@
 - ONVIF Device Service `GetCapabilities`
 - ONVIF Media Service `GetProfiles`
 - ONVIF Media Service `GetStreamUri`
+- ONVIF PTZ Service `GetPresets`
+- ONVIF PTZ Service `SetPreset`
+- ONVIF PTZ Service `GotoPreset`
+- ONVIF PTZ Service `RemovePreset`
+- ONVIF PTZ Service `ContinuousMove`
+- ONVIF PTZ Service `Stop`
 - WS-Security UsernameToken 인증: PasswordDigest, PasswordText
 
-아직 HTTP Digest 인증, DB 저장, ONVIF 결과의 application flow 연결은 구현하지 않았다.
+아직 HTTP Digest 인증, PTZ preset tour, DB 저장, ONVIF 결과의 application flow 연결은 구현하지 않았다.
 
 ## Directory
 
@@ -23,6 +29,7 @@ lib/app-onvif/
   OnvifDiscoveryService.cpp
   OnvifDeviceClient.cpp
   OnvifMediaClient.cpp
+  OnvifPtzClient.cpp
   OnvifSoapContext.cpp
   onvif_services.h
   include/
@@ -30,10 +37,12 @@ lib/app-onvif/
     OnvifDiscoveryService.h
     OnvifDeviceClient.h
     OnvifMediaClient.h
+    OnvifPtzClient.h
   wsdl/
     ver10/device/wsdl/devicemgmt.wsdl
     ver10/media/wsdl/media.wsdl
     ver10/schema/*.xsd
+    ver20/ptz/wsdl/ptz.wsdl
   external/
     *.xsd
 ```
@@ -45,7 +54,7 @@ lib/app-onvif/
 상위 CMake에서 `add_subdirectory(lib/app-onvif)`로 포함된다. 이 모듈의 CMake는 빌드 중 다음 순서로 gSOAP 코드를 생성한다.
 
 ```text
-devicemgmt.wsdl + media.wsdl
+devicemgmt.wsdl + media.wsdl + ptz.wsdl
   -> wsdl2h
   -> generated/onvif_services_wsdl.h
   -> soapcpp2(onvif_services.h)
@@ -60,7 +69,7 @@ devicemgmt.wsdl + media.wsdl
 - OpenSSL
 - gSOAP plugin: `wsddapi.c`, `wsaapi.c`, `wsseapi.c`, `smdevp.c`, `mecevp.c`
 
-Discovery, Device Service, Media Service는 하나의 `onvif_services.h`로 통합 생성한다.
+Discovery, Device Service, Media Service, PTZ Service는 하나의 `onvif_services.h`로 통합 생성한다.
 
 ```cpp
 #import "wsdd.h"
@@ -68,7 +77,7 @@ Discovery, Device Service, Media Service는 하나의 `onvif_services.h`로 통�
 #import "onvif_services_wsdl.h"
 ```
 
-이렇게 묶는 이유는 Discovery, Device, Media를 따로 생성했을 때 `soapC.cpp` serializer symbol이 중복될 수 있기 때문이다.
+이렇게 묶는 이유는 Discovery, Device, Media, PTZ를 따로 생성했을 때 `soapC.cpp` serializer symbol이 중복될 수 있기 때문이다.
 
 ## Discovery 사용법
 
@@ -311,7 +320,105 @@ std::optional<OnvifStreamUri> streamUri = mediaClient.getStreamUri(
     OnvifMediaTransportProtocol::Rtsp);
 ```
 
-WS-Security가 필요한 장비라면 Device client와 Media client에 같은 옵션을 넘기면 된다.
+## PTZ 사용법
+
+PTZ 호출에는 `GetCapabilities`에서 얻은 `ptzXAddr`와 Media Service `GetProfiles`에서 얻은 `profile.token`이 필요하다. `ptzXAddr`는 PTZ Service endpoint이고, `profile.token`은 어떤 Media Profile 기준으로 PTZ를 제어할지 지정하는 값이다.
+
+```cpp
+#include "OnvifDeviceClient.h"
+#include "OnvifDiscoveryService.h"
+#include "OnvifMediaClient.h"
+#include "OnvifPtzClient.h"
+
+OnvifDiscoveryService discovery;
+OnvifDeviceClient deviceClient;
+OnvifMediaClient mediaClient;
+OnvifPtzClient ptzClient;
+
+std::vector<OnvifDiscoveredDevice> devices = discovery.discoverOnce();
+
+for (const OnvifDiscoveredDevice& device : devices) {
+    if (device.xaddrs.empty()) {
+        continue;
+    }
+
+    std::optional<OnvifDeviceCapabilities> capabilities =
+        deviceClient.getCapabilities(device.xaddrs.front());
+
+    if (!capabilities || capabilities->mediaXAddr.empty() || capabilities->ptzXAddr.empty()) {
+        continue;
+    }
+
+    std::optional<std::vector<OnvifMediaProfile>> profiles =
+        mediaClient.getProfiles(capabilities->mediaXAddr);
+
+    if (!profiles || profiles->empty()) {
+        continue;
+    }
+
+    const std::string& profileToken = profiles->front().token;
+    const std::string& ptzServiceUrl = capabilities->ptzXAddr;
+
+    // PTZ 호출은 ptzServiceUrl + profileToken 조합으로 수행한다.
+}
+```
+
+프리셋 목록은 `getPresets()`로 조회한다.
+
+```cpp
+std::optional<std::vector<OnvifPtzPreset>> presets =
+    ptzClient.getPresets(ptzServiceUrl, profileToken);
+
+if (presets) {
+    for (const OnvifPtzPreset& preset : *presets) {
+        // preset.token
+        // preset.name
+    }
+}
+```
+
+현재 위치를 프리셋으로 저장하려면 `setPreset()`을 사용한다. 새 프리셋을 만들 때는 preset token을 비워두고, 기존 프리셋을 갱신할 때는 기존 token을 함께 넘긴다.
+
+```cpp
+std::optional<std::string> presetToken =
+    ptzClient.setPreset(ptzServiceUrl, profileToken, "Gate");
+
+std::optional<std::string> updatedPresetToken =
+    ptzClient.setPreset(ptzServiceUrl, profileToken, "Gate", "Preset001");
+```
+
+저장된 프리셋 위치로 이동하거나 삭제할 때는 preset token을 사용한다.
+
+```cpp
+bool moved = ptzClient.gotoPreset(ptzServiceUrl, profileToken, "Preset001");
+bool removed = ptzClient.removePreset(ptzServiceUrl, profileToken, "Preset001");
+```
+
+연속 이동은 `continuousMove()`로 수행한다. `pan`, `tilt`, `zoom` 값은 장비의 PTZ velocity space에 맞는 정규화된 속도 값으로 넘긴다. 일반적으로 `-1.0`부터 `1.0` 범위를 먼저 시도한다.
+
+```cpp
+// 오른쪽으로 pan 이동
+bool started = ptzClient.continuousMove(ptzServiceUrl, profileToken, 0.5f, 0.0f);
+
+// 위로 tilt 이동
+started = ptzClient.continuousMove(ptzServiceUrl, profileToken, 0.0f, 0.5f);
+
+// 확대 zoom 이동
+started = ptzClient.continuousMove(ptzServiceUrl, profileToken, 0.0f, 0.0f, 0.5f);
+```
+
+연속 이동을 멈출 때는 `stop()`을 호출한다.
+
+```cpp
+bool stopped = ptzClient.stop(ptzServiceUrl, profileToken);
+
+// pan/tilt만 멈추고 zoom은 유지
+stopped = ptzClient.stop(ptzServiceUrl, profileToken, true, false);
+```
+
+PTZ는 장비별 지원 범위 차이가 크다. 실제 운영에서는 `GetNodes`, `GetConfigurationOptions` 같은 capability/options 계열 응답으로 지원 space와 속도 범위를 확인한 뒤 UI 입력 범위를 제한하는 편이 좋다. 현재 `OnvifPtzClient`는 기본 이동, 정지, 프리셋 기능만 감싸며 preset tour는 아직 구현하지 않았다.
+
+WS-Security가 필요한 장비라면 Device client, Media client, PTZ client에 같은 옵션을 넘기면 된다.
 
 ```cpp
 OnvifClientOptions options;
@@ -321,6 +428,7 @@ options.wsSecurity.password = "password";
 
 OnvifDeviceClient deviceClient(options);
 OnvifMediaClient mediaClient(options);
+OnvifPtzClient ptzClient(options);
 ```
 
 실전에서는 `xaddrs.front()`를 바로 쓰기보다 접근 가능한 HTTP/HTTPS endpoint를 고르는 helper를 두는 편이 좋다.
