@@ -237,3 +237,157 @@ VmsDeviceService::PtzControlResult VmsDeviceService::stopChannel(
     }
     return {PtzControlStatus::Success};
 }
+
+VmsDeviceService::PresetListResult VmsDeviceService::getChannelPresetList(std::int64_t channelId) {
+    PresetListResult result;
+    result.channelId = channelId;
+
+    if (!deviceRepository.findPtzTargetByChannelId(channelId)) {
+        result.status = ListStatus::NotFound;
+        return result;
+    }
+
+    const auto presets = deviceRepository.listChannelPresets(channelId);
+    for (const auto& preset : presets) {
+        PresetItem item;
+        item.presetId = preset.presetId;
+        item.presetToken = preset.presetToken;
+        item.presetName = preset.presetName;
+        item.pan = preset.pan;
+        item.tilt = preset.tilt;
+        item.zoom = preset.zoom;
+        item.linear = preset.linear;
+        result.items.emplace_back(std::move(item));
+    }
+
+    result.status = ListStatus::Success;
+    return result;
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::setChannelPreset(
+    std::int64_t channelId,
+    const std::string& presetName) {
+    const std::string name = trim(presetName);
+    if (name.empty() || name.size() > 128) {
+        return {PtzControlStatus::InvalidArgument};
+    }
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isConfigured(*target)) {
+        return {PtzControlStatus::Unsupported};
+    }
+
+    const auto presetToken = ptzClient.setPreset(target->ptzXAddr, target->profileToken, name);
+    if (!presetToken || trim(*presetToken).empty()) {
+        LogSync::error("[device.ptz.preset.set] ONVIF SetPreset failed for channel_id=", channelId);
+        return {PtzControlStatus::UpstreamError};
+    }
+
+    if (!deviceRepository.upsertChannelPreset(channelId, trim(*presetToken), name)) {
+        LogSync::error("[device.ptz.preset.set] DB upsert failed for channel_id=", channelId);
+        return {PtzControlStatus::InternalError};
+    }
+    return {PtzControlStatus::Success};
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::goToChannelPreset(
+    std::int64_t channelId,
+    std::int64_t presetId) {
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isConfigured(*target)) {
+        return {PtzControlStatus::Unsupported};
+    }
+
+    const auto preset = deviceRepository.findChannelPreset(channelId, presetId);
+    if (!preset) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (trim(preset->presetToken).empty()) {
+        return {PtzControlStatus::InternalError};
+    }
+
+    if (!ptzClient.gotoPreset(target->ptzXAddr, target->profileToken, preset->presetToken)) {
+        LogSync::error("[device.ptz.preset.goto] ONVIF GotoPreset failed for preset_id=", presetId);
+        return {PtzControlStatus::UpstreamError};
+    }
+    return {PtzControlStatus::Success};
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::updateChannelPreset(
+    std::int64_t channelId,
+    std::int64_t presetId,
+    const std::string& presetName) {
+    const std::string name = trim(presetName);
+    if (name.empty() || name.size() > 128) {
+        return {PtzControlStatus::InvalidArgument};
+    }
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isConfigured(*target)) {
+        return {PtzControlStatus::Unsupported};
+    }
+
+    const auto preset = deviceRepository.findChannelPreset(channelId, presetId);
+    if (!preset) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (trim(preset->presetToken).empty()) {
+        return {PtzControlStatus::InternalError};
+    }
+
+    const auto updatedToken = ptzClient.setPreset(
+        target->ptzXAddr,
+        target->profileToken,
+        name,
+        preset->presetToken);
+    if (!updatedToken) {
+        LogSync::error("[device.ptz.preset.update] ONVIF SetPreset failed for preset_id=", presetId);
+        return {PtzControlStatus::UpstreamError};
+    }
+
+    if (!deviceRepository.updateChannelPresetName(channelId, presetId, name)) {
+        LogSync::error("[device.ptz.preset.update] DB update failed for preset_id=", presetId);
+        return {PtzControlStatus::InternalError};
+    }
+    return {PtzControlStatus::Success};
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::deleteChannelPreset(
+    std::int64_t channelId,
+    std::int64_t presetId) {
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isConfigured(*target)) {
+        return {PtzControlStatus::Unsupported};
+    }
+
+    const auto preset = deviceRepository.findChannelPreset(channelId, presetId);
+    if (!preset) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (trim(preset->presetToken).empty()) {
+        return {PtzControlStatus::InternalError};
+    }
+
+    if (!ptzClient.removePreset(target->ptzXAddr, target->profileToken, preset->presetToken)) {
+        LogSync::error("[device.ptz.preset.delete] ONVIF RemovePreset failed for preset_id=", presetId);
+        return {PtzControlStatus::UpstreamError};
+    }
+
+    if (!deviceRepository.deleteChannelPreset(channelId, presetId)) {
+        LogSync::error("[device.ptz.preset.delete] DB delete failed for preset_id=", presetId);
+        return {PtzControlStatus::InternalError};
+    }
+    return {PtzControlStatus::Success};
+}

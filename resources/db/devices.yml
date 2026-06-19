@@ -136,3 +136,75 @@ mapper:
         WHERE c.channel_id = #{channel_id}
           AND c.enabled = true
         LIMIT 1
+
+    - id: listChannelPresets
+      sequence: select
+      query: >
+        SELECT
+          preset_id,
+          channel_id,
+          preset_token,
+          preset_name,
+          pan,
+          tilt,
+          zoom,
+          linear
+        FROM ptz_preset
+        WHERE channel_id = #{channel_id}
+        ORDER BY preset_id
+
+    - id: getChannelPresetById
+      sequence: select
+      query: >
+        SELECT
+          preset_id,
+          channel_id,
+          preset_token,
+          preset_name,
+          pan,
+          tilt,
+          zoom,
+          linear
+        FROM ptz_preset
+        WHERE channel_id = #{channel_id}
+          AND preset_id = #{preset_id}
+        LIMIT 1
+
+    - id: upsertChannelPreset
+      sequence: insert
+      query: >
+        INSERT INTO ptz_preset (
+          channel_id,
+          preset_token,
+          preset_name,
+          created_at,
+          updated_at
+        ) VALUES (
+          #{channel_id},
+          #{preset_token},
+          #{preset_name},
+          NOW(),
+          NOW()
+        )
+        ON CONFLICT (channel_id, preset_token)
+        WHERE preset_token IS NOT NULL AND preset_token <> ''
+        DO UPDATE SET
+          preset_name = EXCLUDED.preset_name,
+          updated_at = NOW()
+
+    - id: updateChannelPresetName
+      sequence: update
+      query: >
+        UPDATE ptz_preset
+        SET
+          preset_name = #{preset_name},
+          updated_at = NOW()
+        WHERE channel_id = #{channel_id}
+          AND preset_id = #{preset_id}
+
+    - id: deleteChannelPreset
+      sequence: delete
+      query: >
+        DELETE FROM ptz_preset
+        WHERE channel_id = #{channel_id}
+          AND preset_id = #{preset_id}

@@ -52,6 +52,16 @@ public:
         std::string rtsp;
     };
 
+    struct PresetItem {
+        std::int64_t presetId = 0;
+        std::string presetToken;
+        std::string presetName;
+        double pan = 0.0;
+        double tilt = 0.0;
+        double zoom = 0.0;
+        double linear = 0.0;
+    };
+
     struct DeviceListResult {
         ListStatus status = ListStatus::InternalError;
         int page = 1;
@@ -63,6 +73,12 @@ public:
         ListStatus status = ListStatus::InternalError;
         std::int64_t deviceId = 0;
         std::vector<ChannelItem> items;
+    };
+
+    struct PresetListResult {
+        ListStatus status = ListStatus::InternalError;
+        std::int64_t channelId = 0;
+        std::vector<PresetItem> items;
     };
 
     struct ChangeNameResult {
@@ -88,6 +104,14 @@ public:
     PtzControlResult tiltChannel(std::int64_t channelId, float speed);
     PtzControlResult moveChannelLinear(std::int64_t channelId, float pan, float tilt, float zoom);
     PtzControlResult stopChannel(std::int64_t channelId, bool panTilt, bool zoom);
+    PresetListResult getChannelPresetList(std::int64_t channelId);
+    PtzControlResult setChannelPreset(std::int64_t channelId, const std::string& presetName);
+    PtzControlResult goToChannelPreset(std::int64_t channelId, std::int64_t presetId);
+    PtzControlResult updateChannelPreset(
+        std::int64_t channelId,
+        std::int64_t presetId,
+        const std::string& presetName);
+    PtzControlResult deleteChannelPreset(std::int64_t channelId, std::int64_t presetId);
 
 private:
     VmsDeviceRepository& deviceRepository;

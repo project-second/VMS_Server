@@ -4,6 +4,7 @@
 #include "DbRuntime.hpp"
 #include "LogSync.h"
 
+#include <exception>
 #include <utility>
 
 namespace {
@@ -57,6 +58,48 @@ std::optional<VmsDeviceRepository::PtzTargetRecord> mapPtzTargetRecord(const DbT
     DbRow::getBoolCell(row, "supports_zoom", target.supportsZoom);
     DbRow::getBoolCell(row, "supports_linear", target.supportsLinear);
     return target;
+}
+
+bool getDoubleCell(const DbTemplate::TypedRow& row, const std::string& key, double& out) {
+    const auto it = row.find(key);
+    if (it == row.end() || std::holds_alternative<std::monostate>(it->second)) return false;
+
+    if (const auto* value = std::get_if<double>(&it->second)) {
+        out = *value;
+        return true;
+    }
+    if (const auto* value = std::get_if<std::int64_t>(&it->second)) {
+        out = static_cast<double>(*value);
+        return true;
+    }
+    if (const auto* value = std::get_if<std::string>(&it->second)) {
+        try {
+            std::size_t consumed = 0;
+            const double parsed = std::stod(*value, &consumed);
+            if (consumed == value->size()) {
+                out = parsed;
+                return true;
+            }
+        } catch (const std::exception&) {
+        }
+    }
+    return false;
+}
+
+std::optional<VmsDeviceRepository::PresetRecord> mapPresetRecord(const DbTemplate::TypedRow& row) {
+    VmsDeviceRepository::PresetRecord preset;
+    if (!DbRow::getInt64Cell(row, "preset_id", preset.presetId)
+        || !DbRow::getInt64Cell(row, "channel_id", preset.channelId)) {
+        return std::nullopt;
+    }
+
+    DbRow::getStringCell(row, "preset_token", preset.presetToken);
+    DbRow::getStringCell(row, "preset_name", preset.presetName);
+    getDoubleCell(row, "pan", preset.pan);
+    getDoubleCell(row, "tilt", preset.tilt);
+    getDoubleCell(row, "zoom", preset.zoom);
+    getDoubleCell(row, "linear", preset.linear);
+    return preset;
 }
 
 } // namespace
@@ -140,4 +183,70 @@ std::optional<VmsDeviceRepository::PtzTargetRecord> VmsDeviceRepository::findPtz
         LogSync::error("[device.repository] invalid ptz target row for channel_id=", channelId);
     }
     return target;
+}
+
+std::vector<VmsDeviceRepository::PresetRecord> VmsDeviceRepository::listChannelPresets(
+    std::int64_t channelId) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+
+    std::vector<PresetRecord> presets;
+    const auto rows = AppDb::select("devices.listChannelPresets", params);
+    for (const auto& row : rows) {
+        auto preset = mapPresetRecord(row);
+        if (preset) {
+            presets.emplace_back(std::move(*preset));
+        } else {
+            LogSync::error("[device.repository] invalid preset row for channel_id=", channelId);
+        }
+    }
+    return presets;
+}
+
+std::optional<VmsDeviceRepository::PresetRecord> VmsDeviceRepository::findChannelPreset(
+    std::int64_t channelId,
+    std::int64_t presetId) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("preset_id", presetId);
+
+    const auto rows = AppDb::select("devices.getChannelPresetById", params);
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+
+    auto preset = mapPresetRecord(rows.front());
+    if (!preset) {
+        LogSync::error("[device.repository] invalid preset row for preset_id=", presetId);
+    }
+    return preset;
+}
+
+bool VmsDeviceRepository::upsertChannelPreset(
+    std::int64_t channelId,
+    const std::string& presetToken,
+    const std::string& presetName) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("preset_token", presetToken);
+    params.emplace("preset_name", presetName);
+    return AppDb::insert("devices.upsertChannelPreset", params);
+}
+
+bool VmsDeviceRepository::updateChannelPresetName(
+    std::int64_t channelId,
+    std::int64_t presetId,
+    const std::string& presetName) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("preset_id", presetId);
+    params.emplace("preset_name", presetName);
+    return AppDb::update("devices.updateChannelPresetName", params);
+}
+
+bool VmsDeviceRepository::deleteChannelPreset(std::int64_t channelId, std::int64_t presetId) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("preset_id", presetId);
+    return AppDb::remove("devices.deleteChannelPreset", params);
 }

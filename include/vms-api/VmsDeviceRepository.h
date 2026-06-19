@@ -42,6 +42,17 @@ public:
         bool supportsLinear = true;
     };
 
+    struct PresetRecord {
+        std::int64_t presetId = 0;
+        std::int64_t channelId = 0;
+        std::string presetToken;
+        std::string presetName;
+        double pan = 0.0;
+        double tilt = 0.0;
+        double zoom = 0.0;
+        double linear = 0.0;
+    };
+
     VmsDeviceRepository();
     ~VmsDeviceRepository();
 
@@ -50,6 +61,17 @@ public:
     bool updateDeviceName(std::int64_t deviceId, const std::string& name) const;
     std::vector<ChannelRecord> listDeviceChannels(std::int64_t deviceId) const;
     std::optional<PtzTargetRecord> findPtzTargetByChannelId(std::int64_t channelId) const;
+    std::vector<PresetRecord> listChannelPresets(std::int64_t channelId) const;
+    std::optional<PresetRecord> findChannelPreset(std::int64_t channelId, std::int64_t presetId) const;
+    bool upsertChannelPreset(
+        std::int64_t channelId,
+        const std::string& presetToken,
+        const std::string& presetName) const;
+    bool updateChannelPresetName(
+        std::int64_t channelId,
+        std::int64_t presetId,
+        const std::string& presetName) const;
+    bool deleteChannelPreset(std::int64_t channelId, std::int64_t presetId) const;
 };
 
 #endif // __VMSDEVICEREPOSITORY_H__
