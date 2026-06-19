@@ -1,10 +1,12 @@
 #include "VmsDeviceService.h"
 
 #include "LogSync.h"
+#include "OnvifPtzClient.h"
 #include "StringHelpers.h"
 #include "VmsDeviceRepository.h"
 
 #include <algorithm>
+#include <cmath>
 #include <utility>
 
 namespace {
@@ -12,6 +14,11 @@ namespace {
 VmsDeviceRepository& defaultDeviceRepository() {
     static VmsDeviceRepository repository;
     return repository;
+}
+
+OnvifPtzClient& defaultPtzClient() {
+    static OnvifPtzClient client;
+    return client;
 }
 
 std::string healthName(std::int64_t onlineState, std::int64_t videoState) {
@@ -50,10 +57,14 @@ VmsDeviceService::ChannelItem toChannelItem(const VmsDeviceRepository::ChannelRe
 
 } // namespace
 
-VmsDeviceService::VmsDeviceService() : deviceRepository(defaultDeviceRepository()) {}
+VmsDeviceService::VmsDeviceService()
+    : deviceRepository(defaultDeviceRepository()), ptzClient(defaultPtzClient()) {}
 
 VmsDeviceService::VmsDeviceService(VmsDeviceRepository& deviceRepository)
-    : deviceRepository(deviceRepository) {}
+    : deviceRepository(deviceRepository), ptzClient(defaultPtzClient()) {}
+
+VmsDeviceService::VmsDeviceService(VmsDeviceRepository& deviceRepository, OnvifPtzClient& ptzClient)
+    : deviceRepository(deviceRepository), ptzClient(ptzClient) {}
 
 VmsDeviceService::~VmsDeviceService() {}
 
@@ -119,4 +130,110 @@ VmsDeviceService::ChannelListResult VmsDeviceService::getDeviceChannelList(std::
 
     result.status = ListStatus::Success;
     return result;
+}
+
+
+namespace {
+
+bool validVelocity(float value) {
+    return std::isfinite(value) && value >= -1.0f && value <= 1.0f;
+}
+
+bool isConfigured(const VmsDeviceRepository::PtzTargetRecord& target) {
+    return !trim(target.ptzXAddr).empty() && !trim(target.profileToken).empty();
+}
+
+} // namespace
+
+VmsDeviceService::PtzControlResult VmsDeviceService::panChannel(std::int64_t channelId, float speed) {
+    if (!validVelocity(speed) || speed == 0.0f) {
+        return {PtzControlStatus::InvalidArgument};
+    }
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isConfigured(*target) || (target->hasCapabilities && !target->supportsPan)) {
+        return {PtzControlStatus::Unsupported};
+    }
+
+    if (!ptzClient.continuousMove(target->ptzXAddr, target->profileToken, speed, 0.0f, 0.0f)) {
+        LogSync::error("[device.ptz.pan] ONVIF ContinuousMove failed for channel_id=", channelId);
+        return {PtzControlStatus::UpstreamError};
+    }
+    return {PtzControlStatus::Success};
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::tiltChannel(std::int64_t channelId, float speed) {
+    if (!validVelocity(speed) || speed == 0.0f) {
+        return {PtzControlStatus::InvalidArgument};
+    }
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isConfigured(*target) || (target->hasCapabilities && !target->supportsTilt)) {
+        return {PtzControlStatus::Unsupported};
+    }
+
+    if (!ptzClient.continuousMove(target->ptzXAddr, target->profileToken, 0.0f, speed, 0.0f)) {
+        LogSync::error("[device.ptz.tilt] ONVIF ContinuousMove failed for channel_id=", channelId);
+        return {PtzControlStatus::UpstreamError};
+    }
+    return {PtzControlStatus::Success};
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::moveChannelLinear(
+    std::int64_t channelId,
+    float pan,
+    float tilt,
+    float zoom) {
+    if (!validVelocity(pan) || !validVelocity(tilt) || !validVelocity(zoom)
+        || (pan == 0.0f && tilt == 0.0f && zoom == 0.0f)) {
+        return {PtzControlStatus::InvalidArgument};
+    }
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isConfigured(*target)
+        || (target->hasCapabilities
+            && (!target->supportsLinear
+                || (pan != 0.0f && !target->supportsPan)
+                || (tilt != 0.0f && !target->supportsTilt)
+                || (zoom != 0.0f && !target->supportsZoom)))) {
+        return {PtzControlStatus::Unsupported};
+    }
+
+    if (!ptzClient.continuousMove(target->ptzXAddr, target->profileToken, pan, tilt, zoom)) {
+        LogSync::error("[device.ptz.linear] ONVIF ContinuousMove failed for channel_id=", channelId);
+        return {PtzControlStatus::UpstreamError};
+    }
+    return {PtzControlStatus::Success};
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::stopChannel(
+    std::int64_t channelId,
+    bool panTilt,
+    bool zoom) {
+    if (!panTilt && !zoom) {
+        return {PtzControlStatus::InvalidArgument};
+    }
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isConfigured(*target)) {
+        return {PtzControlStatus::Unsupported};
+    }
+
+    if (!ptzClient.stop(target->ptzXAddr, target->profileToken, panTilt, zoom)) {
+        LogSync::error("[device.ptz.stop] ONVIF Stop failed for channel_id=", channelId);
+        return {PtzControlStatus::UpstreamError};
+    }
+    return {PtzControlStatus::Success};
 }

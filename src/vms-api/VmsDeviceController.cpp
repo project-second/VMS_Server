@@ -2,6 +2,57 @@
 
 #include "VmsApiResponses.h"
 #include "VmsRequestHelpers.h"
+#include "StringHelpers.h"
+
+#include <optional>
+
+namespace {
+
+std::optional<float> jsonFloatField(const json& body, const char* key) {
+    if (!body.contains(key) || !body[key].is_number()) {
+        return std::nullopt;
+    }
+    return body[key].get<float>();
+}
+
+std::optional<float> jsonPtzVelocityValue(const json& body) {
+    const auto value = jsonFloatField(body, "value");
+    if (!value || *value < -100.0f || *value > 100.0f) {
+        return std::nullopt;
+    }
+    return *value / 100.0f;
+}
+
+std::optional<bool> jsonBoolField(const json& body, const char* key) {
+    if (!body.contains(key)) {
+        return std::nullopt;
+    }
+    if (!body[key].is_boolean()) {
+        return std::nullopt;
+    }
+    return body[key].get<bool>();
+}
+
+Http::Response ptzControlResponse(VmsDeviceService::PtzControlStatus status) {
+    if (status == VmsDeviceService::PtzControlStatus::Success) {
+        return VmsApiResponse::successResponse({{"result", "OK"}});
+    }
+    if (status == VmsDeviceService::PtzControlStatus::NotFound) {
+        return VmsApiResponse::notFoundResponse();
+    }
+    if (status == VmsDeviceService::PtzControlStatus::InvalidArgument) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+    if (status == VmsDeviceService::PtzControlStatus::Unsupported) {
+        return VmsApiResponse::conflictResponse("PTZ_UNSUPPORTED");
+    }
+    if (status == VmsDeviceService::PtzControlStatus::UpstreamError) {
+        return VmsApiResponse::errorResponse(HttpCode::Bad_Gateway, "PTZ_UPSTREAM_ERROR");
+    }
+    return VmsApiResponse::internalServerErrorResponse();
+}
+
+} // namespace
 
 VmsDeviceController::VmsDeviceController(HttpServer& server, VmsDeviceService& deviceService)
     : httpServer(server), deviceService(deviceService) {
@@ -133,90 +184,107 @@ httpServer.addRoute(HttpMethod::GET, "/devices/{deviceId}/channels", [this](cons
 }
 
 // POST /channels/{channelId}/ptz/pan
-// 채널의 pan 연속 이동 API. 추후 channelId로 ptzXAddr/profileToken을 찾고 OnvifPtzClient::continuousMove를 호출한다.
+// 채널의 pan 연속 이동 API. channelId로 PTZ target을 찾아 ContinuousMove를 호출한다.
 void VmsDeviceController::handleChannelPanControl() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/pan", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"result", "OK"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto requestBody = VmsRequest::parseJsonObject(req);
+    if (!requestBody) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto speed = jsonPtzVelocityValue(*requestBody);
+    if (!speed) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.panChannel(channelId, *speed);
+    return ptzControlResponse(result.status);
 });
 }
 
 // POST /channels/{channelId}/ptz/tilt
-// 채널의 tilt 연속 이동 API. pan과 동일하게 OnvifPtzClient::continuousMove로 연결한다.
+// 채널의 tilt 연속 이동 API. channelId로 PTZ target을 찾아 ContinuousMove를 호출한다.
 void VmsDeviceController::handleChannelTiltControl() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tilt", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"result", "OK"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto requestBody = VmsRequest::parseJsonObject(req);
+    if (!requestBody) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto speed = jsonPtzVelocityValue(*requestBody);
+    if (!speed) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.tiltChannel(channelId, *speed);
+    return ptzControlResponse(result.status);
 });
 }
 
 // POST /channels/{channelId}/ptz/linear
-// pan/tilt/zoom을 한 번에 전달하는 PTZ 이동 API로 사용할 수 있는 route다.
+// pan/tilt/zoom을 한 번에 전달하는 PTZ 이동 API다.
 void VmsDeviceController::handleChannelLinearControl() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/linear", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"result", "OK"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto requestBody = VmsRequest::parseJsonObject(req);
+    if (!requestBody) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto value = jsonPtzVelocityValue(*requestBody);
+    if (!value) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.moveChannelLinear(channelId, *value, *value, 0.0f);
+    return ptzControlResponse(result.status);
 });
 }
 
 // POST /channels/{channelId}/ptz/stop
-// 진행 중인 PTZ 이동 중지 API. 추후 OnvifPtzClient::stop과 연결한다.
+// 진행 중인 PTZ 이동 중지 API. channelId로 PTZ target을 찾아 Stop을 호출한다.
 void VmsDeviceController::handleChannelStopControl() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/stop", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"result", "OK"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    bool panTilt = true;
+    bool zoom = true;
+    if (!trim(req.body).empty()) {
+        const auto requestBody = VmsRequest::parseJsonObject(req);
+        if (!requestBody) {
+            return VmsApiResponse::invalidArgumentResponse();
+        }
+        if (requestBody->contains("panTilt")) {
+            const auto value = jsonBoolField(*requestBody, "panTilt");
+            if (!value) return VmsApiResponse::invalidArgumentResponse();
+            panTilt = *value;
+        }
+        if (requestBody->contains("zoom")) {
+            const auto value = jsonBoolField(*requestBody, "zoom");
+            if (!value) return VmsApiResponse::invalidArgumentResponse();
+            zoom = *value;
+        }
+    }
+
+    const auto result = deviceService.stopChannel(channelId, panTilt, zoom);
+    return ptzControlResponse(result.status);
 });
 }
 

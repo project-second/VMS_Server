@@ -18,6 +18,8 @@ mapper:
           type,
           uuid,
           addr,
+          media_xaddr,
+          ptz_xaddr,
           name,
           manufacturer,
           model,
@@ -28,6 +30,8 @@ mapper:
           #{type},
           #{uuid},
           #{addr},
+          #{media_xaddr},
+          #{ptz_xaddr},
           #{name},
           #{manufacturer},
           #{model},
@@ -42,6 +46,8 @@ mapper:
         UPDATE devices
         SET
           addr = #{addr},
+          media_xaddr = #{media_xaddr},
+          ptz_xaddr = #{ptz_xaddr},
           name = #{name},
           manufacturer = #{manufacturer},
           model = #{model}

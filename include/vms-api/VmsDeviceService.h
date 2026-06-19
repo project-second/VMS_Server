@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 
+class OnvifPtzClient;
 class VmsDeviceRepository;
 
 class VmsDeviceService {
@@ -19,6 +20,15 @@ public:
         Success,
         NotFound,
         InvalidArgument,
+        InternalError
+    };
+
+    enum class PtzControlStatus {
+        Success,
+        NotFound,
+        InvalidArgument,
+        Unsupported,
+        UpstreamError,
         InternalError
     };
 
@@ -61,17 +71,27 @@ public:
         std::string name;
     };
 
+    struct PtzControlResult {
+        PtzControlStatus status = PtzControlStatus::InternalError;
+    };
+
 public:
     VmsDeviceService();
     explicit VmsDeviceService(VmsDeviceRepository& deviceRepository);
+    VmsDeviceService(VmsDeviceRepository& deviceRepository, OnvifPtzClient& ptzClient);
     ~VmsDeviceService();
 
     DeviceListResult getDeviceList(int page, int size);
     ChangeNameResult changeDeviceName(std::int64_t deviceId, const std::string& name);
     ChannelListResult getDeviceChannelList(std::int64_t deviceId);
+    PtzControlResult panChannel(std::int64_t channelId, float speed);
+    PtzControlResult tiltChannel(std::int64_t channelId, float speed);
+    PtzControlResult moveChannelLinear(std::int64_t channelId, float pan, float tilt, float zoom);
+    PtzControlResult stopChannel(std::int64_t channelId, bool panTilt, bool zoom);
 
 private:
     VmsDeviceRepository& deviceRepository;
+    OnvifPtzClient& ptzClient;
 };
 
 #endif // __VMSDEVICESERVICE_H__

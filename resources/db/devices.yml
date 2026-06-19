@@ -96,3 +96,43 @@ mapper:
         WHERE c.device_id = #{device_id}
           AND c.enabled = true
         ORDER BY c.channel_no, c.channel_id
+
+
+    - id: getPtzTargetByChannelId
+      sequence: select
+      query: >
+        SELECT
+          c.channel_id,
+          d.device_id,
+          d.ptz_xaddr,
+          d.username,
+          d.password_enc,
+          p.onvif_profile_token AS profile_token,
+          pc.channel_id AS capability_channel_id,
+          pc.supports_pan,
+          pc.supports_tilt,
+          pc.supports_zoom,
+          pc.supports_linear
+        FROM channels c
+        INNER JOIN devices d ON d.device_id = c.device_id
+        LEFT JOIN ptz_capabilities pc ON pc.channel_id = c.channel_id
+        LEFT JOIN LATERAL (
+          SELECT onvif_profile_token
+          FROM profiles
+          WHERE channel_id = c.channel_id
+            AND enabled = true
+            AND onvif_profile_token IS NOT NULL
+            AND onvif_profile_token <> ''
+          ORDER BY
+            CASE
+              WHEN c.use_profile IS NOT NULL
+                AND profile_no = c.use_profile THEN 0
+              ELSE 1
+            END,
+            profile_no,
+            profile_id
+          LIMIT 1
+        ) p ON true
+        WHERE c.channel_id = #{channel_id}
+          AND c.enabled = true
+        LIMIT 1

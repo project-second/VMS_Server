@@ -90,6 +90,8 @@ std::optional<std::int64_t> OnvifProvisioningRepository::upsertDevice(const Prov
     params.emplace("type", kDeviceTypeCctv);
     params.emplace("uuid", uuid);
     params.emplace("addr", result.deviceServiceUrl);
+    params.emplace("media_xaddr", result.mediaServiceUrl);
+    params.emplace("ptz_xaddr", result.capabilities.ptzXAddr);
     params.emplace("name", deviceNameOf(result));
     params.emplace("manufacturer", result.deviceInformation.manufacturer);
     params.emplace("model", result.deviceInformation.model);

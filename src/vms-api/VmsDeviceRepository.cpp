@@ -38,6 +38,27 @@ std::optional<VmsDeviceRepository::ChannelRecord> mapChannelRecord(const DbTempl
     return channel;
 }
 
+std::optional<VmsDeviceRepository::PtzTargetRecord> mapPtzTargetRecord(const DbTemplate::TypedRow& row) {
+    VmsDeviceRepository::PtzTargetRecord target;
+    if (!DbRow::getInt64Cell(row, "channel_id", target.channelId)
+        || !DbRow::getInt64Cell(row, "device_id", target.deviceId)) {
+        return std::nullopt;
+    }
+
+    DbRow::getStringCell(row, "ptz_xaddr", target.ptzXAddr);
+    DbRow::getStringCell(row, "profile_token", target.profileToken);
+    DbRow::getStringCell(row, "username", target.username);
+    DbRow::getStringCell(row, "password_enc", target.passwordEnc);
+
+    std::int64_t capabilityChannelId = 0;
+    target.hasCapabilities = DbRow::getInt64Cell(row, "capability_channel_id", capabilityChannelId);
+    DbRow::getBoolCell(row, "supports_pan", target.supportsPan);
+    DbRow::getBoolCell(row, "supports_tilt", target.supportsTilt);
+    DbRow::getBoolCell(row, "supports_zoom", target.supportsZoom);
+    DbRow::getBoolCell(row, "supports_linear", target.supportsLinear);
+    return target;
+}
+
 } // namespace
 
 VmsDeviceRepository::VmsDeviceRepository() = default;
@@ -102,4 +123,21 @@ std::vector<VmsDeviceRepository::ChannelRecord> VmsDeviceRepository::listDeviceC
         }
     }
     return channels;
+}
+
+std::optional<VmsDeviceRepository::PtzTargetRecord> VmsDeviceRepository::findPtzTargetByChannelId(
+    std::int64_t channelId) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+
+    const auto rows = AppDb::select("devices.getPtzTargetByChannelId", params);
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+
+    auto target = mapPtzTargetRecord(rows.front());
+    if (!target) {
+        LogSync::error("[device.repository] invalid ptz target row for channel_id=", channelId);
+    }
+    return target;
 }
