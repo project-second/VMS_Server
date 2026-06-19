@@ -2,6 +2,7 @@
 
 #include "LogSync.h"
 #include "OnvifPtzClient.h"
+#include "SecretCodec.h"
 #include "StringHelpers.h"
 #include "VmsDeviceRepository.h"
 
@@ -143,6 +144,26 @@ bool isConfigured(const VmsDeviceRepository::PtzTargetRecord& target) {
     return !trim(target.ptzXAddr).empty() && !trim(target.profileToken).empty();
 }
 
+OnvifPtzClientOptions ptzOptionsForTarget(const VmsDeviceRepository::PtzTargetRecord& target) {
+    OnvifPtzClientOptions options;
+    const std::string username = trim(target.username);
+    if (username.empty()) {
+        return options;
+    }
+
+    options.wsSecurity.enabled = true;
+    options.wsSecurity.username = username;
+    if (const auto password = decode_stored_secret(target.passwordEnc)) {
+        options.wsSecurity.password = *password;
+    }
+    options.wsSecurity.passwordType = OnvifWsSecurityPasswordType::Digest;
+    return options;
+}
+
+OnvifPtzClient ptzClientForTarget(const VmsDeviceRepository::PtzTargetRecord& target) {
+    return OnvifPtzClient(ptzOptionsForTarget(target));
+}
+
 } // namespace
 
 VmsDeviceService::PtzControlResult VmsDeviceService::panChannel(std::int64_t channelId, float speed) {
@@ -158,7 +179,8 @@ VmsDeviceService::PtzControlResult VmsDeviceService::panChannel(std::int64_t cha
         return {PtzControlStatus::Unsupported};
     }
 
-    if (!ptzClient.continuousMove(target->ptzXAddr, target->profileToken, speed, 0.0f, 0.0f)) {
+    const auto client = ptzClientForTarget(*target);
+    if (!client.continuousMove(target->ptzXAddr, target->profileToken, speed, 0.0f, 0.0f)) {
         LogSync::error("[device.ptz.pan] ONVIF ContinuousMove failed for channel_id=", channelId);
         return {PtzControlStatus::UpstreamError};
     }
@@ -178,7 +200,8 @@ VmsDeviceService::PtzControlResult VmsDeviceService::tiltChannel(std::int64_t ch
         return {PtzControlStatus::Unsupported};
     }
 
-    if (!ptzClient.continuousMove(target->ptzXAddr, target->profileToken, 0.0f, speed, 0.0f)) {
+    const auto client = ptzClientForTarget(*target);
+    if (!client.continuousMove(target->ptzXAddr, target->profileToken, 0.0f, speed, 0.0f)) {
         LogSync::error("[device.ptz.tilt] ONVIF ContinuousMove failed for channel_id=", channelId);
         return {PtzControlStatus::UpstreamError};
     }
@@ -208,7 +231,8 @@ VmsDeviceService::PtzControlResult VmsDeviceService::moveChannelLinear(
         return {PtzControlStatus::Unsupported};
     }
 
-    if (!ptzClient.continuousMove(target->ptzXAddr, target->profileToken, pan, tilt, zoom)) {
+    const auto client = ptzClientForTarget(*target);
+    if (!client.continuousMove(target->ptzXAddr, target->profileToken, pan, tilt, zoom)) {
         LogSync::error("[device.ptz.linear] ONVIF ContinuousMove failed for channel_id=", channelId);
         return {PtzControlStatus::UpstreamError};
     }
@@ -231,7 +255,8 @@ VmsDeviceService::PtzControlResult VmsDeviceService::stopChannel(
         return {PtzControlStatus::Unsupported};
     }
 
-    if (!ptzClient.stop(target->ptzXAddr, target->profileToken, panTilt, zoom)) {
+    const auto client = ptzClientForTarget(*target);
+    if (!client.stop(target->ptzXAddr, target->profileToken, panTilt, zoom)) {
         LogSync::error("[device.ptz.stop] ONVIF Stop failed for channel_id=", channelId);
         return {PtzControlStatus::UpstreamError};
     }
@@ -280,7 +305,8 @@ VmsDeviceService::PtzControlResult VmsDeviceService::setChannelPreset(
         return {PtzControlStatus::Unsupported};
     }
 
-    const auto presetToken = ptzClient.setPreset(target->ptzXAddr, target->profileToken, name);
+    const auto client = ptzClientForTarget(*target);
+    const auto presetToken = client.setPreset(target->ptzXAddr, target->profileToken, name);
     if (!presetToken || trim(*presetToken).empty()) {
         LogSync::error("[device.ptz.preset.set] ONVIF SetPreset failed for channel_id=", channelId);
         return {PtzControlStatus::UpstreamError};
@@ -312,7 +338,8 @@ VmsDeviceService::PtzControlResult VmsDeviceService::goToChannelPreset(
         return {PtzControlStatus::InternalError};
     }
 
-    if (!ptzClient.gotoPreset(target->ptzXAddr, target->profileToken, preset->presetToken)) {
+    const auto client = ptzClientForTarget(*target);
+    if (!client.gotoPreset(target->ptzXAddr, target->profileToken, preset->presetToken)) {
         LogSync::error("[device.ptz.preset.goto] ONVIF GotoPreset failed for preset_id=", presetId);
         return {PtzControlStatus::UpstreamError};
     }
@@ -344,7 +371,8 @@ VmsDeviceService::PtzControlResult VmsDeviceService::updateChannelPreset(
         return {PtzControlStatus::InternalError};
     }
 
-    const auto updatedToken = ptzClient.setPreset(
+    const auto client = ptzClientForTarget(*target);
+    const auto updatedToken = client.setPreset(
         target->ptzXAddr,
         target->profileToken,
         name,
@@ -380,7 +408,8 @@ VmsDeviceService::PtzControlResult VmsDeviceService::deleteChannelPreset(
         return {PtzControlStatus::InternalError};
     }
 
-    if (!ptzClient.removePreset(target->ptzXAddr, target->profileToken, preset->presetToken)) {
+    const auto client = ptzClientForTarget(*target);
+    if (!client.removePreset(target->ptzXAddr, target->profileToken, preset->presetToken)) {
         LogSync::error("[device.ptz.preset.delete] ONVIF RemovePreset failed for preset_id=", presetId);
         return {PtzControlStatus::UpstreamError};
     }

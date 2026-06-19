@@ -16,6 +16,69 @@ struct OnvifPtzPreset {
     std::string name;
 };
 
+struct OnvifFloatRange {
+    float min = 0.0f;
+    float max = 0.0f;
+};
+
+struct OnvifPtzSpace1D {
+    std::string uri;
+    std::optional<OnvifFloatRange> xRange;
+};
+
+struct OnvifPtzSpace2D {
+    std::string uri;
+    std::optional<OnvifFloatRange> xRange;
+    std::optional<OnvifFloatRange> yRange;
+};
+
+struct OnvifPtzSpaces {
+    std::vector<OnvifPtzSpace2D> absolutePanTiltPosition;
+    std::vector<OnvifPtzSpace1D> absoluteZoomPosition;
+    std::vector<OnvifPtzSpace2D> relativePanTiltTranslation;
+    std::vector<OnvifPtzSpace1D> relativeZoomTranslation;
+    std::vector<OnvifPtzSpace2D> continuousPanTiltVelocity;
+    std::vector<OnvifPtzSpace1D> continuousZoomVelocity;
+    std::vector<OnvifPtzSpace1D> panTiltSpeed;
+    std::vector<OnvifPtzSpace1D> zoomSpeed;
+};
+
+struct OnvifPtzNode {
+    std::string token;
+    std::string name;
+    OnvifPtzSpaces supportedSpaces;
+    int maximumNumberOfPresets = 0;
+    bool homeSupported = false;
+    std::vector<std::string> auxiliaryCommands;
+    std::optional<bool> fixedHomePosition;
+    std::optional<bool> geoMove;
+    std::optional<int> maximumNumberOfPresetTours;
+};
+
+struct OnvifPtzConfiguration {
+    std::string token;
+    std::string name;
+    int useCount = 0;
+    std::string nodeToken;
+    std::string defaultAbsolutePanTiltPositionSpace;
+    std::string defaultAbsoluteZoomPositionSpace;
+    std::string defaultRelativePanTiltTranslationSpace;
+    std::string defaultRelativeZoomTranslationSpace;
+    std::string defaultContinuousPanTiltVelocitySpace;
+    std::string defaultContinuousZoomVelocitySpace;
+    std::string defaultPtzTimeout;
+    std::optional<int> moveRamp;
+    std::optional<int> presetRamp;
+    std::optional<int> presetTourRamp;
+};
+
+struct OnvifPtzConfigurationOptions {
+    OnvifPtzSpaces spaces;
+    std::string ptzTimeoutMin;
+    std::string ptzTimeoutMax;
+    std::string ptzRamps;
+};
+
 // ONVIF PTZ Service를 호출하는 얇은 client wrapper다.
 //
 // Device Service의 GetCapabilities에서 얻은 ptzXAddr를 endpoint로 받고,
@@ -24,6 +87,17 @@ struct OnvifPtzPreset {
 class OnvifPtzClient {
 public:
     explicit OnvifPtzClient(OnvifPtzClientOptions options = {});
+
+    // ptzServiceUrl의 PTZ Service에 GetNodes를 호출한다.
+    std::optional<std::vector<OnvifPtzNode>> getNodes(const std::string& ptzServiceUrl) const;
+
+    // ptzServiceUrl의 PTZ Service에 GetConfigurations를 호출한다.
+    std::optional<std::vector<OnvifPtzConfiguration>> getConfigurations(const std::string& ptzServiceUrl) const;
+
+    // configurationToken으로 GetConfigurationOptions를 호출한다.
+    std::optional<OnvifPtzConfigurationOptions> getConfigurationOptions(
+        const std::string& ptzServiceUrl,
+        const std::string& configurationToken) const;
 
     // ptzServiceUrl의 PTZ Service에 GetPresets를 호출한다.
     // profileToken은 PTZ 제어 대상 Media Profile token이다.
