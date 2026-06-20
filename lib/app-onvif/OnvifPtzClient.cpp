@@ -10,11 +10,14 @@ namespace {
 constexpr const char* kGetNodesAction = "http://www.onvif.org/ver20/ptz/wsdl/GetNodes";
 constexpr const char* kGetConfigurationsAction = "http://www.onvif.org/ver20/ptz/wsdl/GetConfigurations";
 constexpr const char* kGetConfigurationOptionsAction = "http://www.onvif.org/ver20/ptz/wsdl/GetConfigurationOptions";
+constexpr const char* kGetStatusAction = "http://www.onvif.org/ver20/ptz/wsdl/GetStatus";
 constexpr const char* kGetPresetsAction = "http://www.onvif.org/ver20/ptz/wsdl/GetPresets";
 constexpr const char* kSetPresetAction = "http://www.onvif.org/ver20/ptz/wsdl/SetPreset";
 constexpr const char* kRemovePresetAction = "http://www.onvif.org/ver20/ptz/wsdl/RemovePreset";
 constexpr const char* kGotoPresetAction = "http://www.onvif.org/ver20/ptz/wsdl/GotoPreset";
 constexpr const char* kContinuousMoveAction = "http://www.onvif.org/ver20/ptz/wsdl/ContinuousMove";
+constexpr const char* kRelativeMoveAction = "http://www.onvif.org/ver20/ptz/wsdl/RelativeMove";
+constexpr const char* kAbsoluteMoveAction = "http://www.onvif.org/ver20/ptz/wsdl/AbsoluteMove";
 constexpr const char* kStopAction = "http://www.onvif.org/ver20/ptz/wsdl/Stop";
 
 OnvifPtzPreset mapPreset(const tt__PTZPreset& preset) {
@@ -144,6 +147,52 @@ OnvifPtzConfigurationOptions mapConfigurationOptions(const tt__PTZConfigurationO
     return result;
 }
 
+std::string moveStatusValue(const tt__MoveStatus* status) {
+    if (status == nullptr) {
+        return {};
+    }
+
+    switch (*status) {
+    case tt__MoveStatus::IDLE:
+        return "IDLE";
+    case tt__MoveStatus::MOVING:
+        return "MOVING";
+    case tt__MoveStatus::UNKNOWN:
+        return "UNKNOWN";
+    }
+
+    return {};
+}
+
+OnvifPtzVector mapVector(const tt__PTZVector* vector) {
+    OnvifPtzVector result;
+    if (vector == nullptr) {
+        return result;
+    }
+
+    if (vector->PanTilt != nullptr) {
+        result.pan = vector->PanTilt->x;
+        result.tilt = vector->PanTilt->y;
+        result.panTiltSpace = valueOf(vector->PanTilt->space);
+    }
+    if (vector->Zoom != nullptr) {
+        result.zoom = vector->Zoom->x;
+        result.zoomSpace = valueOf(vector->Zoom->space);
+    }
+    return result;
+}
+
+OnvifPtzStatus mapStatus(const tt__PTZStatus& status) {
+    OnvifPtzStatus result;
+    result.position = mapVector(status.Position);
+    if (status.MoveStatus != nullptr) {
+        result.panTiltMoveStatus = moveStatusValue(status.MoveStatus->PanTilt);
+        result.zoomMoveStatus = moveStatusValue(status.MoveStatus->Zoom);
+    }
+    result.error = valueOf(status.Error);
+    return result;
+}
+
 bool applySecurity(soap* context, const OnvifPtzClientOptions& options, const char* operationName) {
     if (applyOnvifWsSecurity(context, options.wsSecurity)) {
         return true;
@@ -184,6 +233,37 @@ tt__PTZSpeed* makeVelocity(soap* context, float pan, float tilt, float zoom) {
     }
 
     return velocity;
+}
+
+tt__PTZVector* makeVector(soap* context, float pan, float tilt, float zoom, bool includeZeroAxes) {
+    tt__PTZVector* vector = soap_new_tt__PTZVector(context);
+    if (vector == nullptr) {
+        return nullptr;
+    }
+    vector->soap_default(context);
+
+    if (includeZeroAxes || pan != 0.0f || tilt != 0.0f) {
+        tt__Vector2D* panTilt = soap_new_tt__Vector2D(context);
+        if (panTilt == nullptr) {
+            return nullptr;
+        }
+        panTilt->soap_default(context);
+        panTilt->x = pan;
+        panTilt->y = tilt;
+        vector->PanTilt = panTilt;
+    }
+
+    if (includeZeroAxes || zoom != 0.0f) {
+        tt__Vector1D* zoomVector = soap_new_tt__Vector1D(context);
+        if (zoomVector == nullptr) {
+            return nullptr;
+        }
+        zoomVector->soap_default(context);
+        zoomVector->x = zoom;
+        vector->Zoom = zoomVector;
+    }
+
+    return vector;
 }
 
 } // namespace
@@ -299,6 +379,43 @@ std::optional<OnvifPtzConfigurationOptions> OnvifPtzClient::getConfigurationOpti
     }
 
     return mapConfigurationOptions(*response.PTZConfigurationOptions);
+}
+
+std::optional<OnvifPtzStatus> OnvifPtzClient::getStatus(
+    const std::string& ptzServiceUrl,
+    const std::string& profileToken) const {
+    if (ptzServiceUrl.empty() || profileToken.empty()) {
+        return std::nullopt;
+    }
+
+    auto context = makeOnvifSoapContext(options_);
+
+    _tptz__GetStatus request;
+    _tptz__GetStatusResponse response;
+    request.ProfileToken = profileToken;
+
+    if (!applySecurity(context.get(), options_, "GetStatus")) {
+        return std::nullopt;
+    }
+
+    const int result = soap_call___tptz__GetStatus(
+        context.get(),
+        ptzServiceUrl.c_str(),
+        kGetStatusAction,
+        &request,
+        response);
+
+    if (result != SOAP_OK) {
+        LogSync::error("[ONVIF] GetStatus failed: ", onvifSoapFaultString(context.get()));
+        return std::nullopt;
+    }
+
+    if (response.PTZStatus == nullptr) {
+        LogSync::error("[ONVIF] GetStatus failed: empty PTZStatus response");
+        return std::nullopt;
+    }
+
+    return mapStatus(*response.PTZStatus);
 }
 
 std::optional<std::vector<OnvifPtzPreset>> OnvifPtzClient::getPresets(
@@ -492,6 +609,94 @@ bool OnvifPtzClient::continuousMove(
 
     if (result != SOAP_OK) {
         LogSync::error("[ONVIF] ContinuousMove failed: ", onvifSoapFaultString(context.get()));
+        return false;
+    }
+
+    return true;
+}
+
+bool OnvifPtzClient::absoluteMove(
+    const std::string& ptzServiceUrl,
+    const std::string& profileToken,
+    float pan,
+    float tilt,
+    float zoom) const {
+    if (ptzServiceUrl.empty() || profileToken.empty()) {
+        return false;
+    }
+
+    auto context = makeOnvifSoapContext(options_);
+
+    tt__PTZVector* position = makeVector(context.get(), pan, tilt, zoom, true);
+    if (position == nullptr) {
+        LogSync::error("[ONVIF] AbsoluteMove failed: unable to allocate position");
+        return false;
+    }
+
+    _tptz__AbsoluteMove request;
+    _tptz__AbsoluteMoveResponse response;
+    request.ProfileToken = profileToken;
+    request.Position = position;
+
+    if (!applySecurity(context.get(), options_, "AbsoluteMove")) {
+        return false;
+    }
+
+    const int result = soap_call___tptz__AbsoluteMove(
+        context.get(),
+        ptzServiceUrl.c_str(),
+        kAbsoluteMoveAction,
+        &request,
+        response);
+
+    if (result != SOAP_OK) {
+        LogSync::error("[ONVIF] AbsoluteMove failed: ", onvifSoapFaultString(context.get()));
+        return false;
+    }
+
+    return true;
+}
+
+bool OnvifPtzClient::relativeMove(
+    const std::string& ptzServiceUrl,
+    const std::string& profileToken,
+    float pan,
+    float tilt,
+    float zoom) const {
+    if (ptzServiceUrl.empty() || profileToken.empty()) {
+        return false;
+    }
+    if (pan == 0.0f && tilt == 0.0f && zoom == 0.0f) {
+        LogSync::error("[ONVIF] RelativeMove failed: empty translation");
+        return false;
+    }
+
+    auto context = makeOnvifSoapContext(options_);
+
+    tt__PTZVector* translation = makeVector(context.get(), pan, tilt, zoom, false);
+    if (translation == nullptr) {
+        LogSync::error("[ONVIF] RelativeMove failed: unable to allocate translation");
+        return false;
+    }
+
+    _tptz__RelativeMove request;
+    _tptz__RelativeMoveResponse response;
+    request.ProfileToken = profileToken;
+    request.Translation = translation;
+
+    if (!applySecurity(context.get(), options_, "RelativeMove")) {
+        return false;
+    }
+
+    const int result = soap_call___tptz__RelativeMove(
+        context.get(),
+        ptzServiceUrl.c_str(),
+        kRelativeMoveAction,
+        &request,
+        response);
+
+    if (result != SOAP_OK) {
+        LogSync::error("[ONVIF] RelativeMove failed: ", onvifSoapFaultString(context.get()));
         return false;
     }
 

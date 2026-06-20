@@ -46,6 +46,9 @@ Http::Response ptzControlResponse(VmsDeviceService::PtzControlStatus status) {
     if (status == VmsDeviceService::PtzControlStatus::Unsupported) {
         return VmsApiResponse::conflictResponse("PTZ_UNSUPPORTED");
     }
+    if (status == VmsDeviceService::PtzControlStatus::Busy) {
+        return VmsApiResponse::conflictResponse("PTZ_BUSY");
+    }
     if (status == VmsDeviceService::PtzControlStatus::UpstreamError) {
         return VmsApiResponse::errorResponse(HttpCode::Bad_Gateway, "PTZ_UPSTREAM_ERROR");
     }

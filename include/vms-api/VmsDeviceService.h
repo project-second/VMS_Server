@@ -28,6 +28,7 @@ public:
         NotFound,
         InvalidArgument,
         Unsupported,
+        Busy,
         UpstreamError,
         InternalError
     };

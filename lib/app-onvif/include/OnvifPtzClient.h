@@ -79,6 +79,71 @@ struct OnvifPtzConfigurationOptions {
     std::string ptzRamps;
 };
 
+struct OnvifPtzVector {
+    std::optional<float> pan;
+    std::optional<float> tilt;
+    std::optional<float> zoom;
+    std::string panTiltSpace;
+    std::string zoomSpace;
+};
+
+struct OnvifPtzStatus {
+    OnvifPtzVector position;
+    std::string panTiltMoveStatus;
+    std::string zoomMoveStatus;
+    std::string error;
+};
+
+enum class OnvifPtzOperationStatus {
+    Success,
+    InvalidArgument,
+    Unsupported,
+    UpstreamError
+};
+
+enum class OnvifPtzPresetTourOperation {
+    Start,
+    Stop,
+    Pause,
+    Extended
+};
+
+struct OnvifPtzPresetTourSpot {
+    std::string presetToken;
+    std::optional<float> panSpeed;
+    std::optional<float> tiltSpeed;
+    std::optional<float> zoomSpeed;
+    std::string stayTime;
+};
+
+struct OnvifPtzPresetTour {
+    std::string token;
+    std::string name;
+    std::string state;
+    bool autoStart = false;
+    std::optional<int> recurringTime;
+    std::string recurringDuration;
+    std::string direction;
+    std::optional<bool> randomPresetOrder;
+    std::vector<OnvifPtzPresetTourSpot> spots;
+};
+
+struct OnvifPtzPresetTourOptions {
+    bool autoStartSupported = false;
+    std::optional<OnvifFloatRange> panTiltPositionXRange;
+    std::optional<OnvifFloatRange> panTiltPositionYRange;
+    std::optional<OnvifFloatRange> zoomPositionRange;
+    std::string stayTimeMin;
+    std::string stayTimeMax;
+    std::vector<std::string> presetTokens;
+    std::optional<bool> homeSupported;
+    std::vector<std::string> directions;
+    std::optional<int> recurringTimeMin;
+    std::optional<int> recurringTimeMax;
+    std::string recurringDurationMin;
+    std::string recurringDurationMax;
+};
+
 // ONVIF PTZ Service를 호출하는 얇은 client wrapper다.
 //
 // Device Service의 GetCapabilities에서 얻은 ptzXAddr를 endpoint로 받고,
@@ -98,6 +163,52 @@ public:
     std::optional<OnvifPtzConfigurationOptions> getConfigurationOptions(
         const std::string& ptzServiceUrl,
         const std::string& configurationToken) const;
+
+    // profileToken에 해당하는 현재 PTZ 위치와 pan/tilt/zoom 이동 상태를 조회한다.
+    std::optional<OnvifPtzStatus> getStatus(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken) const;
+
+    // 장비의 preset tour 목록을 조회한다.
+    std::optional<std::vector<OnvifPtzPresetTour>> getPresetTours(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken) const;
+
+    // presetTourToken 하나에 대한 상세 tour 정보를 조회한다.
+    std::optional<OnvifPtzPresetTour> getPresetTour(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken,
+        const std::string& presetTourToken) const;
+
+    // tour 생성/수정 시 장비가 허용하는 preset token, dwell time, 방향 범위를 조회한다.
+    std::optional<OnvifPtzPresetTourOptions> getPresetTourOptions(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken,
+        const std::string& presetTourToken = {}) const;
+
+    // 빈 preset tour를 장비에 생성하고 장비가 반환한 tour token을 돌려준다.
+    std::optional<std::string> createPresetTour(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken) const;
+
+    // tour token, 이름, 반복 조건, spot 목록을 장비에 반영한다.
+    OnvifPtzOperationStatus modifyPresetTour(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken,
+        const OnvifPtzPresetTour& tour) const;
+
+    // Start/Stop/Pause/Extended tour operation을 장비에 전달한다.
+    OnvifPtzOperationStatus operatePresetTour(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken,
+        const std::string& presetTourToken,
+        OnvifPtzPresetTourOperation operation) const;
+
+    // presetTourToken에 해당하는 preset tour를 장비에서 삭제한다.
+    OnvifPtzOperationStatus removePresetTour(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken,
+        const std::string& presetTourToken) const;
 
     // ptzServiceUrl의 PTZ Service에 GetPresets를 호출한다.
     // profileToken은 PTZ 제어 대상 Media Profile token이다.
@@ -133,6 +244,24 @@ public:
     // 일반적으로 -1.0~1.0 범위를 먼저 사용하지만, 실제 허용 범위는 장비의 PTZ options를 확인해야 한다.
     // 세 값이 모두 0이면 이동 요청을 보내지 않고 false를 반환한다.
     bool continuousMove(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken,
+        float pan,
+        float tilt,
+        float zoom = 0.0f) const;
+
+    // AbsoluteMove를 호출해 지정한 절대 pan/tilt/zoom 위치로 이동한다.
+    // 값의 유효 범위와 space는 장비의 PTZ configuration/options 응답을 기준으로 맞춰야 한다.
+    bool absoluteMove(
+        const std::string& ptzServiceUrl,
+        const std::string& profileToken,
+        float pan,
+        float tilt,
+        float zoom = 0.0f) const;
+
+    // RelativeMove를 호출해 현재 위치 기준 pan/tilt/zoom translation만큼 이동한다.
+    // 세 값이 모두 0이면 이동 요청을 보내지 않고 false를 반환한다.
+    bool relativeMove(
         const std::string& ptzServiceUrl,
         const std::string& profileToken,
         float pan,

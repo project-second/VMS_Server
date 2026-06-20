@@ -7,7 +7,12 @@
 #include "VmsDeviceRepository.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <unordered_map>
 #include <utility>
 
 namespace {
@@ -164,6 +169,42 @@ OnvifPtzClient ptzClientForTarget(const VmsDeviceRepository::PtzTargetRecord& ta
     return OnvifPtzClient(ptzOptionsForTarget(target));
 }
 
+std::mutex& ptzCommandLockMapMutex() {
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::unordered_map<std::int64_t, std::shared_ptr<std::timed_mutex>>& ptzCommandLocks() {
+    static std::unordered_map<std::int64_t, std::shared_ptr<std::timed_mutex>> locks;
+    return locks;
+}
+
+std::shared_ptr<std::timed_mutex> ptzCommandLockForDevice(std::int64_t deviceId) {
+    std::lock_guard<std::mutex> guard(ptzCommandLockMapMutex());
+    auto& lock = ptzCommandLocks()[deviceId];
+    if (!lock) {
+        lock = std::make_shared<std::timed_mutex>();
+    }
+    return lock;
+}
+
+std::optional<std::unique_lock<std::timed_mutex>> tryLockPtzCommand(
+    const VmsDeviceRepository::PtzTargetRecord& target,
+    const char* operationName) {
+    constexpr auto kPtzCommandLockTimeout = std::chrono::milliseconds(200);
+
+    auto mutex = ptzCommandLockForDevice(target.deviceId);
+    std::unique_lock<std::timed_mutex> lock(*mutex, std::defer_lock);
+    if (!lock.try_lock_for(kPtzCommandLockTimeout)) {
+        LogSync::error(
+            "[device.ptz] command busy: operation=", operationName,
+            " device_id=", target.deviceId,
+            " channel_id=", target.channelId);
+        return std::nullopt;
+    }
+    return std::move(lock);
+}
+
 } // namespace
 
 VmsDeviceService::PtzControlResult VmsDeviceService::panChannel(std::int64_t channelId, float speed) {
@@ -177,6 +218,11 @@ VmsDeviceService::PtzControlResult VmsDeviceService::panChannel(std::int64_t cha
     }
     if (!isConfigured(*target) || (target->hasCapabilities && !target->supportsPan)) {
         return {PtzControlStatus::Unsupported};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "pan");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
     }
 
     const auto client = ptzClientForTarget(*target);
@@ -198,6 +244,11 @@ VmsDeviceService::PtzControlResult VmsDeviceService::tiltChannel(std::int64_t ch
     }
     if (!isConfigured(*target) || (target->hasCapabilities && !target->supportsTilt)) {
         return {PtzControlStatus::Unsupported};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "tilt");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
     }
 
     const auto client = ptzClientForTarget(*target);
@@ -231,6 +282,11 @@ VmsDeviceService::PtzControlResult VmsDeviceService::moveChannelLinear(
         return {PtzControlStatus::Unsupported};
     }
 
+    auto commandLock = tryLockPtzCommand(*target, "linear");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
+    }
+
     const auto client = ptzClientForTarget(*target);
     if (!client.continuousMove(target->ptzXAddr, target->profileToken, pan, tilt, zoom)) {
         LogSync::error("[device.ptz.linear] ONVIF ContinuousMove failed for channel_id=", channelId);
@@ -253,6 +309,11 @@ VmsDeviceService::PtzControlResult VmsDeviceService::stopChannel(
     }
     if (!isConfigured(*target)) {
         return {PtzControlStatus::Unsupported};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "stop");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
     }
 
     const auto client = ptzClientForTarget(*target);
@@ -305,6 +366,11 @@ VmsDeviceService::PtzControlResult VmsDeviceService::setChannelPreset(
         return {PtzControlStatus::Unsupported};
     }
 
+    auto commandLock = tryLockPtzCommand(*target, "preset.set");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
+    }
+
     const auto client = ptzClientForTarget(*target);
     const auto presetToken = client.setPreset(target->ptzXAddr, target->profileToken, name);
     if (!presetToken || trim(*presetToken).empty()) {
@@ -338,6 +404,11 @@ VmsDeviceService::PtzControlResult VmsDeviceService::goToChannelPreset(
         return {PtzControlStatus::InternalError};
     }
 
+    auto commandLock = tryLockPtzCommand(*target, "preset.goto");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
+    }
+
     const auto client = ptzClientForTarget(*target);
     if (!client.gotoPreset(target->ptzXAddr, target->profileToken, preset->presetToken)) {
         LogSync::error("[device.ptz.preset.goto] ONVIF GotoPreset failed for preset_id=", presetId);
@@ -369,6 +440,11 @@ VmsDeviceService::PtzControlResult VmsDeviceService::updateChannelPreset(
     }
     if (trim(preset->presetToken).empty()) {
         return {PtzControlStatus::InternalError};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "preset.update");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
     }
 
     const auto client = ptzClientForTarget(*target);
@@ -406,6 +482,11 @@ VmsDeviceService::PtzControlResult VmsDeviceService::deleteChannelPreset(
     }
     if (trim(preset->presetToken).empty()) {
         return {PtzControlStatus::InternalError};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "preset.delete");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
     }
 
     const auto client = ptzClientForTarget(*target);
