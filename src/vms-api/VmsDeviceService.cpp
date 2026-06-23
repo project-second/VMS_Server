@@ -8,10 +8,12 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cmath>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sstream>
 #include <unordered_map>
 #include <utility>
 
@@ -58,6 +60,38 @@ VmsDeviceService::ChannelItem toChannelItem(const VmsDeviceRepository::ChannelRe
     item.videoCodec = record.videoCodec;
     item.audioCodec = record.audioCodec;
     item.rtsp = record.rtsp;
+    return item;
+}
+
+VmsDeviceService::TourItem toTourItem(const VmsDeviceRepository::TourItemRecord& record) {
+    VmsDeviceService::TourItem item;
+    item.tourItemId = record.tourItemId;
+    item.presetId = record.presetId;
+    item.presetToken = record.presetToken;
+    item.presetName = record.presetName;
+    item.seqNo = record.seqNo;
+    item.staySeconds = record.staySeconds;
+    item.moveSpeed = record.moveSpeed;
+    return item;
+}
+
+VmsDeviceService::TourItemResult toTourResult(
+    const VmsDeviceRepository::TourRecord& record,
+    const std::vector<VmsDeviceRepository::TourItemRecord>& itemRecords = {}) {
+    VmsDeviceService::TourItemResult item;
+    item.tourId = record.tourId;
+    item.tourToken = record.tourToken;
+    item.tourName = record.tourName;
+    item.repeatMode = record.repeatMode;
+    item.isEnabled = record.isEnabled;
+    item.itemCount = record.itemCount;
+    item.items.reserve(itemRecords.size());
+    for (const auto& itemRecord : itemRecords) {
+        item.items.emplace_back(toTourItem(itemRecord));
+    }
+    if (!item.items.empty()) {
+        item.itemCount = static_cast<std::int64_t>(item.items.size());
+    }
     return item;
 }
 
@@ -203,6 +237,121 @@ std::optional<std::unique_lock<std::timed_mutex>> tryLockPtzCommand(
         return std::nullopt;
     }
     return std::move(lock);
+}
+
+
+bool isTourSupported(const VmsDeviceRepository::PtzTargetRecord& target) {
+    return isConfigured(target) && (!target.hasCapabilities || target.supportsTour);
+}
+
+std::string normalizeRepeatMode(const std::string& repeatMode) {
+    std::string mode = trim(repeatMode);
+    std::transform(mode.begin(), mode.end(), mode.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    if (mode.empty()) {
+        mode = "LOOP";
+    }
+    return mode;
+}
+
+bool validRepeatMode(const std::string& repeatMode) {
+    return repeatMode == "LOOP" || repeatMode == "ONCE";
+}
+
+bool validTourName(const std::string& name) {
+    return !name.empty() && name.size() <= 128;
+}
+
+bool validTourInputItem(const VmsDeviceService::TourItemInput& item) {
+    return item.presetId > 0
+        && item.seqNo > 0
+        && item.staySeconds >= 0
+        && item.staySeconds <= 86400
+        && std::isfinite(item.moveSpeed)
+        && item.moveSpeed >= 0.0
+        && item.moveSpeed <= 100.0;
+}
+
+std::string xsdDurationSeconds(std::int64_t seconds) {
+    return "PT" + std::to_string(std::max<std::int64_t>(0, seconds)) + "S";
+}
+
+OnvifPtzPresetTour makeOnvifTour(
+    const std::string& tourToken,
+    const VmsDeviceService::TourWriteRequest& request,
+    const std::vector<VmsDeviceRepository::TourItemRecord>& items) {
+    OnvifPtzPresetTour tour;
+    tour.token = tourToken;
+    tour.name = request.tourName;
+    tour.autoStart = request.isEnabled;
+    tour.direction = "Forward";
+    if (request.repeatMode == "ONCE") {
+        tour.recurringTime = 1;
+    }
+
+    tour.spots.reserve(items.size());
+    for (const auto& item : items) {
+        OnvifPtzPresetTourSpot spot;
+        spot.presetToken = item.presetToken;
+        spot.stayTime = xsdDurationSeconds(item.staySeconds);
+        if (item.moveSpeed > 0.0) {
+            const float speed = static_cast<float>(item.moveSpeed / 100.0);
+            spot.panSpeed = speed;
+            spot.tiltSpeed = speed;
+            spot.zoomSpeed = speed;
+        }
+        tour.spots.emplace_back(std::move(spot));
+    }
+    return tour;
+}
+
+VmsDeviceService::PtzControlStatus toPtzStatus(OnvifPtzOperationStatus status) {
+    switch (status) {
+    case OnvifPtzOperationStatus::Success:
+        return VmsDeviceService::PtzControlStatus::Success;
+    case OnvifPtzOperationStatus::InvalidArgument:
+        return VmsDeviceService::PtzControlStatus::InvalidArgument;
+    case OnvifPtzOperationStatus::Unsupported:
+        return VmsDeviceService::PtzControlStatus::Unsupported;
+    case OnvifPtzOperationStatus::UpstreamError:
+        return VmsDeviceService::PtzControlStatus::UpstreamError;
+    }
+    return VmsDeviceService::PtzControlStatus::UpstreamError;
+}
+
+std::vector<VmsDeviceRepository::TourItemRecord> resolveTourItems(
+    VmsDeviceRepository& repository,
+    std::int64_t channelId,
+    const std::vector<VmsDeviceService::TourItemInput>& inputs,
+    bool& missingPreset,
+    bool& invalidPreset) {
+    missingPreset = false;
+    invalidPreset = false;
+
+    std::vector<VmsDeviceRepository::TourItemRecord> items;
+    items.reserve(inputs.size());
+    for (const auto& input : inputs) {
+        const auto preset = repository.findChannelPreset(channelId, input.presetId);
+        if (!preset) {
+            missingPreset = true;
+            return {};
+        }
+        if (trim(preset->presetToken).empty()) {
+            invalidPreset = true;
+            return {};
+        }
+
+        VmsDeviceRepository::TourItemRecord item;
+        item.presetId = input.presetId;
+        item.presetToken = preset->presetToken;
+        item.presetName = preset->presetName;
+        item.seqNo = input.seqNo;
+        item.staySeconds = input.staySeconds;
+        item.moveSpeed = input.moveSpeed;
+        items.emplace_back(std::move(item));
+    }
+    return items;
 }
 
 } // namespace
@@ -497,6 +646,315 @@ VmsDeviceService::PtzControlResult VmsDeviceService::deleteChannelPreset(
 
     if (!deviceRepository.deleteChannelPreset(channelId, presetId)) {
         LogSync::error("[device.ptz.preset.delete] DB delete failed for preset_id=", presetId);
+        return {PtzControlStatus::InternalError};
+    }
+    return {PtzControlStatus::Success};
+}
+
+
+VmsDeviceService::TourListResult VmsDeviceService::getChannelTourList(std::int64_t channelId) {
+    TourListResult result;
+    result.channelId = channelId;
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        result.status = ListStatus::NotFound;
+        return result;
+    }
+    if (!isTourSupported(*target)) {
+        result.status = ListStatus::Unsupported;
+        return result;
+    }
+
+    const auto tours = deviceRepository.listChannelTours(channelId);
+    result.items.reserve(tours.size());
+    for (const auto& tour : tours) {
+        result.items.emplace_back(toTourResult(tour));
+    }
+
+    result.status = ListStatus::Success;
+    return result;
+}
+
+VmsDeviceService::TourDetailResult VmsDeviceService::getChannelTourInfo(
+    std::int64_t channelId,
+    std::int64_t tourId) {
+    TourDetailResult result;
+    result.channelId = channelId;
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        result.status = ListStatus::NotFound;
+        return result;
+    }
+    if (!isTourSupported(*target)) {
+        result.status = ListStatus::Unsupported;
+        return result;
+    }
+
+    const auto tour = deviceRepository.findChannelTour(channelId, tourId);
+    if (!tour) {
+        result.status = ListStatus::NotFound;
+        return result;
+    }
+
+    const auto items = deviceRepository.listChannelTourItems(tourId);
+    result.item = toTourResult(*tour, items);
+    result.status = ListStatus::Success;
+    return result;
+}
+
+VmsDeviceService::TourMutationResult VmsDeviceService::createChannelTour(
+    std::int64_t channelId,
+    const TourWriteRequest& rawRequest) {
+    TourWriteRequest request = rawRequest;
+    request.tourName = trim(request.tourName);
+    request.repeatMode = normalizeRepeatMode(request.repeatMode);
+    if (!validTourName(request.tourName) || !validRepeatMode(request.repeatMode)) {
+        return {PtzControlStatus::InvalidArgument, std::nullopt};
+    }
+    for (const auto& item : request.items) {
+        if (!validTourInputItem(item)) {
+            return {PtzControlStatus::InvalidArgument, std::nullopt};
+        }
+    }
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound, std::nullopt};
+    }
+    if (!isTourSupported(*target)) {
+        return {PtzControlStatus::Unsupported, std::nullopt};
+    }
+
+    bool missingPreset = false;
+    bool invalidPreset = false;
+    auto itemRecords = resolveTourItems(deviceRepository, channelId, request.items, missingPreset, invalidPreset);
+    if (missingPreset) {
+        return {PtzControlStatus::NotFound, std::nullopt};
+    }
+    if (invalidPreset) {
+        return {PtzControlStatus::InternalError, std::nullopt};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "tour.create");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy, std::nullopt};
+    }
+
+    const auto client = ptzClientForTarget(*target);
+    const auto tourToken = client.createPresetTour(target->ptzXAddr, target->profileToken);
+    if (!tourToken || trim(*tourToken).empty()) {
+        LogSync::error("[device.ptz.tour.create] ONVIF CreatePresetTour failed for channel_id=", channelId);
+        return {PtzControlStatus::UpstreamError, std::nullopt};
+    }
+
+    if (!itemRecords.empty()) {
+        const auto onvifTour = makeOnvifTour(trim(*tourToken), request, itemRecords);
+        const auto status = toPtzStatus(client.modifyPresetTour(target->ptzXAddr, target->profileToken, onvifTour));
+        if (status != PtzControlStatus::Success) {
+            LogSync::error("[device.ptz.tour.create] ONVIF ModifyPresetTour failed for channel_id=", channelId);
+            return {status, std::nullopt};
+        }
+    }
+
+    const auto tour = deviceRepository.upsertChannelTour(
+        channelId,
+        trim(*tourToken),
+        request.tourName,
+        request.repeatMode,
+        false,
+        request.isEnabled);
+    if (!tour) {
+        LogSync::error("[device.ptz.tour.create] DB upsert failed for channel_id=", channelId);
+        return {PtzControlStatus::InternalError, std::nullopt};
+    }
+    for (auto& item : itemRecords) {
+        item.tourId = tour->tourId;
+    }
+    if (!deviceRepository.replaceChannelTourItems(tour->tourId, itemRecords)) {
+        LogSync::error("[device.ptz.tour.create] DB item replace failed for tour_id=", tour->tourId);
+        return {PtzControlStatus::InternalError, std::nullopt};
+    }
+
+    const auto savedItems = deviceRepository.listChannelTourItems(tour->tourId);
+    return {PtzControlStatus::Success, toTourResult(*tour, savedItems)};
+}
+
+VmsDeviceService::TourMutationResult VmsDeviceService::updateChannelTour(
+    std::int64_t channelId,
+    std::int64_t tourId,
+    const TourWriteRequest& rawRequest) {
+    TourWriteRequest request = rawRequest;
+    request.tourName = trim(request.tourName);
+    request.repeatMode = normalizeRepeatMode(request.repeatMode);
+    if (!validTourName(request.tourName) || !validRepeatMode(request.repeatMode)) {
+        return {PtzControlStatus::InvalidArgument, std::nullopt};
+    }
+    for (const auto& item : request.items) {
+        if (!validTourInputItem(item)) {
+            return {PtzControlStatus::InvalidArgument, std::nullopt};
+        }
+    }
+
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound, std::nullopt};
+    }
+    if (!isTourSupported(*target)) {
+        return {PtzControlStatus::Unsupported, std::nullopt};
+    }
+
+    const auto existingTour = deviceRepository.findChannelTour(channelId, tourId);
+    if (!existingTour) {
+        return {PtzControlStatus::NotFound, std::nullopt};
+    }
+    if (trim(existingTour->tourToken).empty()) {
+        return {PtzControlStatus::InternalError, std::nullopt};
+    }
+
+    bool missingPreset = false;
+    bool invalidPreset = false;
+    auto itemRecords = resolveTourItems(deviceRepository, channelId, request.items, missingPreset, invalidPreset);
+    if (missingPreset) {
+        return {PtzControlStatus::NotFound, std::nullopt};
+    }
+    if (invalidPreset) {
+        return {PtzControlStatus::InternalError, std::nullopt};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "tour.update");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy, std::nullopt};
+    }
+
+    const auto client = ptzClientForTarget(*target);
+    const auto onvifTour = makeOnvifTour(existingTour->tourToken, request, itemRecords);
+    const auto status = toPtzStatus(client.modifyPresetTour(target->ptzXAddr, target->profileToken, onvifTour));
+    if (status != PtzControlStatus::Success) {
+        LogSync::error("[device.ptz.tour.update] ONVIF ModifyPresetTour failed for tour_id=", tourId);
+        return {status, std::nullopt};
+    }
+
+    const auto tour = deviceRepository.upsertChannelTour(
+        channelId,
+        existingTour->tourToken,
+        request.tourName,
+        request.repeatMode,
+        existingTour->scheduleEnabled,
+        request.isEnabled);
+    if (!tour) {
+        LogSync::error("[device.ptz.tour.update] DB upsert failed for tour_id=", tourId);
+        return {PtzControlStatus::InternalError, std::nullopt};
+    }
+    for (auto& item : itemRecords) {
+        item.tourId = tour->tourId;
+    }
+    if (!deviceRepository.replaceChannelTourItems(tour->tourId, itemRecords)) {
+        LogSync::error("[device.ptz.tour.update] DB item replace failed for tour_id=", tour->tourId);
+        return {PtzControlStatus::InternalError, std::nullopt};
+    }
+
+    const auto savedItems = deviceRepository.listChannelTourItems(tour->tourId);
+    return {PtzControlStatus::Success, toTourResult(*tour, savedItems)};
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::startChannelTour(
+    std::int64_t channelId,
+    std::int64_t tourId) {
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isTourSupported(*target)) {
+        return {PtzControlStatus::Unsupported};
+    }
+    const auto tour = deviceRepository.findChannelTour(channelId, tourId);
+    if (!tour) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (trim(tour->tourToken).empty()) {
+        return {PtzControlStatus::InternalError};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "tour.start");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
+    }
+
+    const auto client = ptzClientForTarget(*target);
+    return {toPtzStatus(client.operatePresetTour(
+        target->ptzXAddr,
+        target->profileToken,
+        tour->tourToken,
+        OnvifPtzPresetTourOperation::Start))};
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::stopChannelTour(
+    std::int64_t channelId,
+    std::int64_t tourId) {
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isTourSupported(*target)) {
+        return {PtzControlStatus::Unsupported};
+    }
+    const auto tour = deviceRepository.findChannelTour(channelId, tourId);
+    if (!tour) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (trim(tour->tourToken).empty()) {
+        return {PtzControlStatus::InternalError};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "tour.stop");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
+    }
+
+    const auto client = ptzClientForTarget(*target);
+    return {toPtzStatus(client.operatePresetTour(
+        target->ptzXAddr,
+        target->profileToken,
+        tour->tourToken,
+        OnvifPtzPresetTourOperation::Stop))};
+}
+
+VmsDeviceService::PtzControlResult VmsDeviceService::deleteChannelTour(
+    std::int64_t channelId,
+    std::int64_t tourId) {
+    const auto target = deviceRepository.findPtzTargetByChannelId(channelId);
+    if (!target) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (!isTourSupported(*target)) {
+        return {PtzControlStatus::Unsupported};
+    }
+    const auto tour = deviceRepository.findChannelTour(channelId, tourId);
+    if (!tour) {
+        return {PtzControlStatus::NotFound};
+    }
+    if (trim(tour->tourToken).empty()) {
+        return {PtzControlStatus::InternalError};
+    }
+
+    auto commandLock = tryLockPtzCommand(*target, "tour.delete");
+    if (!commandLock) {
+        return {PtzControlStatus::Busy};
+    }
+
+    const auto client = ptzClientForTarget(*target);
+    const auto status = toPtzStatus(client.removePresetTour(
+        target->ptzXAddr,
+        target->profileToken,
+        tour->tourToken));
+    if (status != PtzControlStatus::Success) {
+        return {status};
+    }
+
+    if (!deviceRepository.deleteChannelTour(channelId, tourId)) {
+        LogSync::error("[device.ptz.tour.delete] DB delete failed for tour_id=", tourId);
         return {PtzControlStatus::InternalError};
     }
     return {PtzControlStatus::Success};

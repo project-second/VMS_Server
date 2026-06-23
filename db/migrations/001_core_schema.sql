@@ -158,6 +158,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_ptz_preset_channel_token
 CREATE TABLE IF NOT EXISTS ptz_tours (
     tour_id bigserial PRIMARY KEY,
     channel_id bigint NOT NULL REFERENCES channels(channel_id) ON DELETE CASCADE,
+    tour_token varchar(128),
     tour_name varchar(128),
     repeat_mode varchar(32),
     schedule_enabled boolean,
@@ -167,6 +168,10 @@ CREATE TABLE IF NOT EXISTS ptz_tours (
 
 CREATE INDEX IF NOT EXISTS ix_ptz_tours_channel
     ON ptz_tours (channel_id, tour_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_ptz_tours_channel_token
+    ON ptz_tours (channel_id, tour_token)
+    WHERE tour_token IS NOT NULL AND tour_token <> '';
 
 CREATE TABLE IF NOT EXISTS ptz_tours_items (
     tour_item_id bigserial PRIMARY KEY,

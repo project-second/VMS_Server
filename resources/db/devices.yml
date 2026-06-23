@@ -112,6 +112,7 @@ mapper:
           pc.supports_pan,
           pc.supports_tilt,
           pc.supports_zoom,
+          pc.supports_tour,
           pc.supports_linear
         FROM channels c
         INNER JOIN devices d ON d.device_id = c.device_id
@@ -208,3 +209,156 @@ mapper:
         DELETE FROM ptz_preset
         WHERE channel_id = #{channel_id}
           AND preset_id = #{preset_id}
+
+
+    - id: listChannelTours
+      sequence: select
+      query: >
+        SELECT
+          t.tour_id,
+          t.channel_id,
+          t.tour_token,
+          t.tour_name,
+          t.repeat_mode,
+          COALESCE(t.schedule_enabled, false) AS schedule_enabled,
+          COALESCE(t.is_enabled, false) AS is_enabled,
+          COUNT(i.tour_item_id) AS item_count
+        FROM ptz_tours t
+        LEFT JOIN ptz_tours_items i ON i.tour_id = t.tour_id
+        WHERE t.channel_id = #{channel_id}
+        GROUP BY
+          t.tour_id,
+          t.channel_id,
+          t.tour_token,
+          t.tour_name,
+          t.repeat_mode,
+          t.schedule_enabled,
+          t.is_enabled
+        ORDER BY t.tour_id
+
+    - id: getChannelTourById
+      sequence: select
+      query: >
+        SELECT
+          t.tour_id,
+          t.channel_id,
+          t.tour_token,
+          t.tour_name,
+          t.repeat_mode,
+          COALESCE(t.schedule_enabled, false) AS schedule_enabled,
+          COALESCE(t.is_enabled, false) AS is_enabled,
+          COUNT(i.tour_item_id) AS item_count
+        FROM ptz_tours t
+        LEFT JOIN ptz_tours_items i ON i.tour_id = t.tour_id
+        WHERE t.channel_id = #{channel_id}
+          AND t.tour_id = #{tour_id}
+        GROUP BY
+          t.tour_id,
+          t.channel_id,
+          t.tour_token,
+          t.tour_name,
+          t.repeat_mode,
+          t.schedule_enabled,
+          t.is_enabled
+        LIMIT 1
+
+    - id: getChannelTourByToken
+      sequence: select
+      query: >
+        SELECT
+          t.tour_id,
+          t.channel_id,
+          t.tour_token,
+          t.tour_name,
+          t.repeat_mode,
+          COALESCE(t.schedule_enabled, false) AS schedule_enabled,
+          COALESCE(t.is_enabled, false) AS is_enabled,
+          COUNT(i.tour_item_id) AS item_count
+        FROM ptz_tours t
+        LEFT JOIN ptz_tours_items i ON i.tour_id = t.tour_id
+        WHERE t.channel_id = #{channel_id}
+          AND t.tour_token = #{tour_token}
+        GROUP BY
+          t.tour_id,
+          t.channel_id,
+          t.tour_token,
+          t.tour_name,
+          t.repeat_mode,
+          t.schedule_enabled,
+          t.is_enabled
+        LIMIT 1
+
+    - id: upsertChannelTour
+      sequence: insert
+      query: >
+        INSERT INTO ptz_tours (
+          channel_id,
+          tour_token,
+          tour_name,
+          repeat_mode,
+          schedule_enabled,
+          is_enabled,
+          created_at
+        ) VALUES (
+          #{channel_id},
+          #{tour_token},
+          #{tour_name},
+          #{repeat_mode},
+          #{schedule_enabled},
+          #{is_enabled},
+          NOW()
+        )
+        ON CONFLICT (channel_id, tour_token)
+        WHERE tour_token IS NOT NULL AND tour_token <> ''
+        DO UPDATE SET
+          tour_name = EXCLUDED.tour_name,
+          repeat_mode = EXCLUDED.repeat_mode,
+          schedule_enabled = EXCLUDED.schedule_enabled,
+          is_enabled = EXCLUDED.is_enabled
+
+    - id: listChannelTourItems
+      sequence: select
+      query: >
+        SELECT
+          i.tour_item_id,
+          i.tour_id,
+          i.preset_id,
+          p.preset_token,
+          p.preset_name,
+          COALESCE(i.seq_no, 0) AS seq_no,
+          COALESCE(i.stay_seconds, 0) AS stay_seconds,
+          COALESCE(i.move_speed, 0) AS move_speed
+        FROM ptz_tours_items i
+        INNER JOIN ptz_preset p ON p.preset_id = i.preset_id
+        WHERE i.tour_id = #{tour_id}
+        ORDER BY i.seq_no, i.tour_item_id
+
+    - id: deleteChannelTourItems
+      sequence: delete
+      query: >
+        DELETE FROM ptz_tours_items
+        WHERE tour_id = #{tour_id}
+
+    - id: insertChannelTourItem
+      sequence: insert
+      query: >
+        INSERT INTO ptz_tours_items (
+          tour_id,
+          preset_id,
+          seq_no,
+          stay_seconds,
+          move_speed
+        ) VALUES (
+          #{tour_id},
+          #{preset_id},
+          #{seq_no},
+          #{stay_seconds},
+          #{move_speed}
+        )
+
+    - id: deleteChannelTour
+      sequence: delete
+      query: >
+        DELETE FROM ptz_tours
+        WHERE channel_id = #{channel_id}
+          AND tour_id = #{tour_id}

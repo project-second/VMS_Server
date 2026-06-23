@@ -56,6 +56,7 @@ std::optional<VmsDeviceRepository::PtzTargetRecord> mapPtzTargetRecord(const DbT
     DbRow::getBoolCell(row, "supports_pan", target.supportsPan);
     DbRow::getBoolCell(row, "supports_tilt", target.supportsTilt);
     DbRow::getBoolCell(row, "supports_zoom", target.supportsZoom);
+    DbRow::getBoolCell(row, "supports_tour", target.supportsTour);
     DbRow::getBoolCell(row, "supports_linear", target.supportsLinear);
     return target;
 }
@@ -100,6 +101,38 @@ std::optional<VmsDeviceRepository::PresetRecord> mapPresetRecord(const DbTemplat
     getDoubleCell(row, "zoom", preset.zoom);
     getDoubleCell(row, "linear", preset.linear);
     return preset;
+}
+
+std::optional<VmsDeviceRepository::TourRecord> mapTourRecord(const DbTemplate::TypedRow& row) {
+    VmsDeviceRepository::TourRecord tour;
+    if (!DbRow::getInt64Cell(row, "tour_id", tour.tourId)
+        || !DbRow::getInt64Cell(row, "channel_id", tour.channelId)) {
+        return std::nullopt;
+    }
+
+    DbRow::getStringCell(row, "tour_token", tour.tourToken);
+    DbRow::getStringCell(row, "tour_name", tour.tourName);
+    DbRow::getStringCell(row, "repeat_mode", tour.repeatMode);
+    DbRow::getBoolCell(row, "schedule_enabled", tour.scheduleEnabled);
+    DbRow::getBoolCell(row, "is_enabled", tour.isEnabled);
+    DbRow::getInt64Cell(row, "item_count", tour.itemCount);
+    return tour;
+}
+
+std::optional<VmsDeviceRepository::TourItemRecord> mapTourItemRecord(const DbTemplate::TypedRow& row) {
+    VmsDeviceRepository::TourItemRecord item;
+    if (!DbRow::getInt64Cell(row, "tour_item_id", item.tourItemId)
+        || !DbRow::getInt64Cell(row, "tour_id", item.tourId)
+        || !DbRow::getInt64Cell(row, "preset_id", item.presetId)) {
+        return std::nullopt;
+    }
+
+    DbRow::getStringCell(row, "preset_token", item.presetToken);
+    DbRow::getStringCell(row, "preset_name", item.presetName);
+    DbRow::getInt64Cell(row, "seq_no", item.seqNo);
+    DbRow::getInt64Cell(row, "stay_seconds", item.staySeconds);
+    getDoubleCell(row, "move_speed", item.moveSpeed);
+    return item;
 }
 
 } // namespace
@@ -249,4 +282,130 @@ bool VmsDeviceRepository::deleteChannelPreset(std::int64_t channelId, std::int64
     params.emplace("channel_id", channelId);
     params.emplace("preset_id", presetId);
     return AppDb::remove("devices.deleteChannelPreset", params);
+}
+
+
+std::vector<VmsDeviceRepository::TourRecord> VmsDeviceRepository::listChannelTours(
+    std::int64_t channelId) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+
+    std::vector<TourRecord> tours;
+    const auto rows = AppDb::select("devices.listChannelTours", params);
+    for (const auto& row : rows) {
+        auto tour = mapTourRecord(row);
+        if (tour) {
+            tours.emplace_back(std::move(*tour));
+        } else {
+            LogSync::error("[device.repository] invalid tour row for channel_id=", channelId);
+        }
+    }
+    return tours;
+}
+
+std::optional<VmsDeviceRepository::TourRecord> VmsDeviceRepository::findChannelTour(
+    std::int64_t channelId,
+    std::int64_t tourId) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("tour_id", tourId);
+
+    const auto rows = AppDb::select("devices.getChannelTourById", params);
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+
+    auto tour = mapTourRecord(rows.front());
+    if (!tour) {
+        LogSync::error("[device.repository] invalid tour row for tour_id=", tourId);
+    }
+    return tour;
+}
+
+std::optional<VmsDeviceRepository::TourRecord> VmsDeviceRepository::findChannelTourByToken(
+    std::int64_t channelId,
+    const std::string& tourToken) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("tour_token", tourToken);
+
+    const auto rows = AppDb::select("devices.getChannelTourByToken", params);
+    if (rows.empty()) {
+        return std::nullopt;
+    }
+
+    auto tour = mapTourRecord(rows.front());
+    if (!tour) {
+        LogSync::error("[device.repository] invalid tour row for tour_token=", tourToken);
+    }
+    return tour;
+}
+
+std::optional<VmsDeviceRepository::TourRecord> VmsDeviceRepository::upsertChannelTour(
+    std::int64_t channelId,
+    const std::string& tourToken,
+    const std::string& tourName,
+    const std::string& repeatMode,
+    bool scheduleEnabled,
+    bool isEnabled) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("tour_token", tourToken);
+    params.emplace("tour_name", tourName);
+    params.emplace("repeat_mode", repeatMode);
+    params.emplace("schedule_enabled", scheduleEnabled);
+    params.emplace("is_enabled", isEnabled);
+
+    if (!AppDb::insert("devices.upsertChannelTour", params)) {
+        return std::nullopt;
+    }
+    return findChannelTourByToken(channelId, tourToken);
+}
+
+std::vector<VmsDeviceRepository::TourItemRecord> VmsDeviceRepository::listChannelTourItems(
+    std::int64_t tourId) const {
+    DbTemplate::ParamMap params;
+    params.emplace("tour_id", tourId);
+
+    std::vector<TourItemRecord> items;
+    const auto rows = AppDb::select("devices.listChannelTourItems", params);
+    for (const auto& row : rows) {
+        auto item = mapTourItemRecord(row);
+        if (item) {
+            items.emplace_back(std::move(*item));
+        } else {
+            LogSync::error("[device.repository] invalid tour item row for tour_id=", tourId);
+        }
+    }
+    return items;
+}
+
+bool VmsDeviceRepository::replaceChannelTourItems(
+    std::int64_t tourId,
+    const std::vector<TourItemRecord>& items) const {
+    DbTemplate::ParamMap deleteParams;
+    deleteParams.emplace("tour_id", tourId);
+    if (!AppDb::remove("devices.deleteChannelTourItems", deleteParams)) {
+        return false;
+    }
+
+    for (const TourItemRecord& item : items) {
+        DbTemplate::ParamMap params;
+        params.emplace("tour_id", tourId);
+        params.emplace("preset_id", item.presetId);
+        params.emplace("seq_no", item.seqNo);
+        params.emplace("stay_seconds", item.staySeconds);
+        params.emplace("move_speed", item.moveSpeed);
+        if (!AppDb::insert("devices.insertChannelTourItem", params)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+bool VmsDeviceRepository::deleteChannelTour(std::int64_t channelId, std::int64_t tourId) const {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("tour_id", tourId);
+    return AppDb::remove("devices.deleteChannelTour", params);
 }

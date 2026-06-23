@@ -39,6 +39,7 @@ public:
         bool supportsPan = true;
         bool supportsTilt = true;
         bool supportsZoom = true;
+        bool supportsTour = true;
         bool supportsLinear = true;
     };
 
@@ -51,6 +52,28 @@ public:
         double tilt = 0.0;
         double zoom = 0.0;
         double linear = 0.0;
+    };
+
+    struct TourRecord {
+        std::int64_t tourId = 0;
+        std::int64_t channelId = 0;
+        std::string tourToken;
+        std::string tourName;
+        std::string repeatMode;
+        bool scheduleEnabled = false;
+        bool isEnabled = false;
+        std::int64_t itemCount = 0;
+    };
+
+    struct TourItemRecord {
+        std::int64_t tourItemId = 0;
+        std::int64_t tourId = 0;
+        std::int64_t presetId = 0;
+        std::string presetToken;
+        std::string presetName;
+        std::int64_t seqNo = 0;
+        std::int64_t staySeconds = 0;
+        double moveSpeed = 0.0;
     };
 
     VmsDeviceRepository();
@@ -72,6 +95,24 @@ public:
         std::int64_t presetId,
         const std::string& presetName) const;
     bool deleteChannelPreset(std::int64_t channelId, std::int64_t presetId) const;
+
+    std::vector<TourRecord> listChannelTours(std::int64_t channelId) const;
+    std::optional<TourRecord> findChannelTour(std::int64_t channelId, std::int64_t tourId) const;
+    std::optional<TourRecord> findChannelTourByToken(
+        std::int64_t channelId,
+        const std::string& tourToken) const;
+    std::optional<TourRecord> upsertChannelTour(
+        std::int64_t channelId,
+        const std::string& tourToken,
+        const std::string& tourName,
+        const std::string& repeatMode,
+        bool scheduleEnabled,
+        bool isEnabled) const;
+    std::vector<TourItemRecord> listChannelTourItems(std::int64_t tourId) const;
+    bool replaceChannelTourItems(
+        std::int64_t tourId,
+        const std::vector<TourItemRecord>& items) const;
+    bool deleteChannelTour(std::int64_t channelId, std::int64_t tourId) const;
 };
 
 #endif // __VMSDEVICEREPOSITORY_H__

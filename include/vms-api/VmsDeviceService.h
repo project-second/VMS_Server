@@ -2,6 +2,7 @@
 #define __VMSDEVICESERVICE_H__
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -13,6 +14,7 @@ public:
     enum class ListStatus {
         Success,
         NotFound,
+        Unsupported,
         InternalError
     };
 
@@ -63,6 +65,40 @@ public:
         double linear = 0.0;
     };
 
+    struct TourItem {
+        std::int64_t tourItemId = 0;
+        std::int64_t presetId = 0;
+        std::string presetToken;
+        std::string presetName;
+        std::int64_t seqNo = 0;
+        std::int64_t staySeconds = 0;
+        double moveSpeed = 0.0;
+    };
+
+    struct TourItemInput {
+        std::int64_t presetId = 0;
+        std::int64_t seqNo = 0;
+        std::int64_t staySeconds = 0;
+        double moveSpeed = 0.0;
+    };
+
+    struct TourWriteRequest {
+        std::string tourName;
+        std::string repeatMode = "LOOP";
+        bool isEnabled = true;
+        std::vector<TourItemInput> items;
+    };
+
+    struct TourItemResult {
+        std::int64_t tourId = 0;
+        std::string tourToken;
+        std::string tourName;
+        std::string repeatMode;
+        bool isEnabled = false;
+        std::int64_t itemCount = 0;
+        std::vector<TourItem> items;
+    };
+
     struct DeviceListResult {
         ListStatus status = ListStatus::InternalError;
         int page = 1;
@@ -80,6 +116,23 @@ public:
         ListStatus status = ListStatus::InternalError;
         std::int64_t channelId = 0;
         std::vector<PresetItem> items;
+    };
+
+    struct TourListResult {
+        ListStatus status = ListStatus::InternalError;
+        std::int64_t channelId = 0;
+        std::vector<TourItemResult> items;
+    };
+
+    struct TourDetailResult {
+        ListStatus status = ListStatus::InternalError;
+        std::int64_t channelId = 0;
+        TourItemResult item;
+    };
+
+    struct TourMutationResult {
+        PtzControlStatus status = PtzControlStatus::InternalError;
+        std::optional<TourItemResult> item;
     };
 
     struct ChangeNameResult {
@@ -113,6 +166,17 @@ public:
         std::int64_t presetId,
         const std::string& presetName);
     PtzControlResult deleteChannelPreset(std::int64_t channelId, std::int64_t presetId);
+
+    TourListResult getChannelTourList(std::int64_t channelId);
+    TourDetailResult getChannelTourInfo(std::int64_t channelId, std::int64_t tourId);
+    TourMutationResult createChannelTour(std::int64_t channelId, const TourWriteRequest& request);
+    TourMutationResult updateChannelTour(
+        std::int64_t channelId,
+        std::int64_t tourId,
+        const TourWriteRequest& request);
+    PtzControlResult startChannelTour(std::int64_t channelId, std::int64_t tourId);
+    PtzControlResult stopChannelTour(std::int64_t channelId, std::int64_t tourId);
+    PtzControlResult deleteChannelTour(std::int64_t channelId, std::int64_t tourId);
 
 private:
     VmsDeviceRepository& deviceRepository;

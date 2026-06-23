@@ -55,6 +55,122 @@ Http::Response ptzControlResponse(VmsDeviceService::PtzControlStatus status) {
     return VmsApiResponse::internalServerErrorResponse();
 }
 
+Http::Response listResponse(VmsDeviceService::ListStatus status) {
+    if (status == VmsDeviceService::ListStatus::NotFound) {
+        return VmsApiResponse::notFoundResponse();
+    }
+    if (status == VmsDeviceService::ListStatus::Unsupported) {
+        return VmsApiResponse::conflictResponse("PTZ_UNSUPPORTED");
+    }
+    return VmsApiResponse::internalServerErrorResponse();
+}
+
+std::optional<std::int64_t> jsonInt64Field(const json& body, const char* key) {
+    if (!body.contains(key) || !body[key].is_number_integer()) {
+        return std::nullopt;
+    }
+    return body[key].get<std::int64_t>();
+}
+
+std::optional<double> jsonDoubleField(const json& body, const char* key) {
+    if (!body.contains(key) || !body[key].is_number()) {
+        return std::nullopt;
+    }
+    return body[key].get<double>();
+}
+
+json tourSummaryJson(const VmsDeviceService::TourItemResult& item) {
+    return {
+        {"tourId", item.tourId},
+        {"tourToken", item.tourToken},
+        {"tourName", item.tourName},
+        {"repeatMode", item.repeatMode},
+        {"isEnabled", item.isEnabled},
+        {"itemCount", item.itemCount}
+    };
+}
+
+json tourDetailJson(const VmsDeviceService::TourItemResult& item) {
+    json body = tourSummaryJson(item);
+    json items = json::array();
+    for (const auto& tourItem : item.items) {
+        items.push_back({
+            {"tourItemId", tourItem.tourItemId},
+            {"presetId", tourItem.presetId},
+            {"presetToken", tourItem.presetToken},
+            {"presetName", tourItem.presetName},
+            {"seqNo", tourItem.seqNo},
+            {"staySecond", tourItem.staySeconds},
+            {"moveSpeed", tourItem.moveSpeed}
+        });
+    }
+    body["items"] = std::move(items);
+    return body;
+}
+
+std::optional<VmsDeviceService::TourWriteRequest> parseTourWriteRequest(const Http::Request& req) {
+    const auto requestBody = VmsRequest::parseJsonObject(req);
+    if (!requestBody) {
+        return std::nullopt;
+    }
+
+    VmsDeviceService::TourWriteRequest request;
+    if (!requestBody->contains("tourName") || !(*requestBody)["tourName"].is_string()) {
+        return std::nullopt;
+    }
+    request.tourName = (*requestBody)["tourName"].get<std::string>();
+
+    if (requestBody->contains("repeatMode")) {
+        if (!(*requestBody)["repeatMode"].is_string()) {
+            return std::nullopt;
+        }
+        request.repeatMode = (*requestBody)["repeatMode"].get<std::string>();
+    }
+    if (requestBody->contains("isEnabled")) {
+        const auto value = jsonBoolField(*requestBody, "isEnabled");
+        if (!value) return std::nullopt;
+        request.isEnabled = *value;
+    }
+
+    if (requestBody->contains("items")) {
+        if (!(*requestBody)["items"].is_array()) {
+            return std::nullopt;
+        }
+        std::int64_t fallbackSeqNo = 1;
+        for (const auto& rawItem : (*requestBody)["items"]) {
+            if (!rawItem.is_object()) {
+                return std::nullopt;
+            }
+            VmsDeviceService::TourItemInput item;
+            const auto presetId = jsonInt64Field(rawItem, "presetId");
+            if (!presetId) return std::nullopt;
+            item.presetId = *presetId;
+
+            if (const auto seqNo = jsonInt64Field(rawItem, "seqNo")) {
+                item.seqNo = *seqNo;
+            } else {
+                item.seqNo = fallbackSeqNo;
+            }
+            ++fallbackSeqNo;
+
+            if (const auto staySecond = jsonInt64Field(rawItem, "staySecond")) {
+                item.staySeconds = *staySecond;
+            } else if (const auto staySeconds = jsonInt64Field(rawItem, "staySeconds")) {
+                item.staySeconds = *staySeconds;
+            } else {
+                return std::nullopt;
+            }
+
+            const auto moveSpeed = jsonDoubleField(rawItem, "moveSpeed");
+            if (!moveSpeed) return std::nullopt;
+            item.moveSpeed = *moveSpeed;
+            request.items.emplace_back(std::move(item));
+        }
+    }
+
+    return request;
+}
+
 } // namespace
 
 VmsDeviceController::VmsDeviceController(HttpServer& server, VmsDeviceService& deviceService)
@@ -411,192 +527,142 @@ httpServer.addRoute(HttpMethod::DELETE, "/channels/{channelId}/ptz/presets/{pres
 }
 
 // GET /channels/{channelId}/ptz/tours
-// 채널 preset tour 목록 조회 API. 현재는 샘플 응답이며, app-onvif preset tour wrapper는 아직 없다.
+// 채널 preset tour 목록 조회 API. DB에 저장된 tour cache를 반환한다.
 void VmsDeviceController::handleGetChannelTourList() {
 httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/tours", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", json::array({
-            {
-                {"tourId", 1},
-                {"tourName", "Tour 1"},
-                {"isEnabled", true},
-                {"itemCount", 5}
-            },
-            {
-                {"tourId", 2},
-                {"tourName", "Tour 2"},
-                {"isEnabled", false},
-                {"itemCount", 3}
-            }
-        }),
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.getChannelTourList(channelId);
+    if (result.status != VmsDeviceService::ListStatus::Success) {
+        return listResponse(result.status);
+    }
+
+    json items = json::array();
+    for (const auto& item : result.items) {
+        items.push_back(tourSummaryJson(item));
+    }
+    return VmsApiResponse::successResponse({{"items", items}});
 });
 }
 
 // POST /channels/{channelId}/ptz/tours
-// preset tour 생성 API. 추후 ONVIF CreatePresetTour 또는 VMS 내부 tour 저장 정책과 연결한다.
+// preset tour 생성 API. ONVIF CreatePresetTour 후 DB tour/item cache를 저장한다.
 void VmsDeviceController::handleCreateChannelTour() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"result", "OK"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto request = parseTourWriteRequest(req);
+    if (!request) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.createChannelTour(channelId, *request);
+    if (result.status != VmsDeviceService::PtzControlStatus::Success) {
+        return ptzControlResponse(result.status);
+    }
+    return VmsApiResponse::successResponse(result.item ? tourDetailJson(*result.item) : json{{"result", "OK"}});
 });
 }
 
-// GET /channels/{channelId}/ptz/tours{tourId}
+// GET /channels/{channelId}/ptz/tours/{tourId}
 // preset tour 상세 조회 API. tour item 순서, 체류 시간, 이동 속도 정보를 반환한다.
 void VmsDeviceController::handleGetChannelTourInfo() {
 httpServer.addRoute(HttpMethod::GET, "/channels/{channelId}/ptz/tours/{tourId}", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    const std::string* tourId = req.getPathParam("tourId");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"tourId", *tourId},
-            {"tourName", "Tour 1"},
-            {"repeatMode", "LOOP"},
-            {"isEnabled", true},
-            {"items", json::array({
-                {
-                    {"tourItemId", 1},
-                    {"presetId", 1},
-                    {"presetName", "Preset 1"},
-                    {"seqNo", 1},
-                    {"staySecond", 5},
-                    {"moveSpeed", 50}
-                },
-                {
-                    {"tourItemId", 2},
-                    {"presetId", 2},
-                    {"presetName", "Preset 2"},
-                    {"seqNo", 2},
-                    {"staySecond", 10},
-                    {"moveSpeed", 50}
-                }
-            })}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    std::int64_t tourId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)
+        || !VmsRequest::parsePathInt64(req, "tourId", tourId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.getChannelTourInfo(channelId, tourId);
+    if (result.status != VmsDeviceService::ListStatus::Success) {
+        return listResponse(result.status);
+    }
+    return VmsApiResponse::successResponse(tourDetailJson(result.item));
 });
 }
 
 // POST /channels/{channelId}/ptz/tours/{tourId}/start
-// preset tour 시작 API. 추후 ONVIF OperatePresetTour Start와 연결한다.
+// preset tour 시작 API. ONVIF OperatePresetTour Start를 호출한다.
 void VmsDeviceController::handleStartChannelTour() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours/{tourId}/start", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    const std::string* tourId = req.getPathParam("tourId");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"result", "OK"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    std::int64_t tourId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)
+        || !VmsRequest::parsePathInt64(req, "tourId", tourId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+    if (!trim(req.body).empty() && !VmsRequest::parseJsonObject(req)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.startChannelTour(channelId, tourId);
+    return ptzControlResponse(result.status);
 });
 }
 
 // POST /channels/{channelId}/ptz/tours/{tourId}/stop
-// preset tour 중지 API. 추후 ONVIF OperatePresetTour Stop과 연결한다.
+// preset tour 중지 API. ONVIF OperatePresetTour Stop을 호출한다.
 void VmsDeviceController::handleStopChannelTour() {
 httpServer.addRoute(HttpMethod::POST, "/channels/{channelId}/ptz/tours/{tourId}/stop", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    const std::string* tourId = req.getPathParam("tourId");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"result", "OK"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    std::int64_t tourId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)
+        || !VmsRequest::parsePathInt64(req, "tourId", tourId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+    if (!trim(req.body).empty() && !VmsRequest::parseJsonObject(req)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.stopChannelTour(channelId, tourId);
+    return ptzControlResponse(result.status);
 });
 }
 
 // PUT /channels/{channelId}/ptz/tours/{tourId}
-// preset tour 이름/반복 조건/item 구성 갱신 API.
+// preset tour 이름/반복 조건/item 구성을 ONVIF와 DB cache에 반영한다.
 void VmsDeviceController::handleUpdateChannelTourInfo() {
 httpServer.addRoute(HttpMethod::PUT, "/channels/{channelId}/ptz/tours/{tourId}", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    const std::string* tourId = req.getPathParam("tourId");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"result", "OK"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    std::int64_t tourId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)
+        || !VmsRequest::parsePathInt64(req, "tourId", tourId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto request = parseTourWriteRequest(req);
+    if (!request) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.updateChannelTour(channelId, tourId, *request);
+    if (result.status != VmsDeviceService::PtzControlStatus::Success) {
+        return ptzControlResponse(result.status);
+    }
+    return VmsApiResponse::successResponse(result.item ? tourDetailJson(*result.item) : json{{"result", "OK"}});
 });
 }
 
 // DELETE /channels/{channelId}/ptz/tours/{tourId}
-// preset tour 삭제 API. 추후 ONVIF RemovePresetTour 또는 VMS DB 삭제와 연결한다.
+// preset tour를 ONVIF 장비와 DB cache에서 삭제한다.
 void VmsDeviceController::handleDeleteChannelTour() {
 httpServer.addRoute(HttpMethod::DELETE, "/channels/{channelId}/ptz/tours/{tourId}", [this](const Http::Request& req) -> Http::Response {
-    const std::string* channelNo = req.getPathParam("channelNo");
-    const std::string* tourId = req.getPathParam("tourId");
-    
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        "ok", true,
-        "data", {
-            {"result", "OK"}
-        },
-        "error", nullptr
-    };
-    res.body = response_body.dump();
-    return res;
+    std::int64_t channelId = 0;
+    std::int64_t tourId = 0;
+    if (!VmsRequest::parsePathInt64(req, "channelId", channelId)
+        || !VmsRequest::parsePathInt64(req, "tourId", tourId)) {
+        return VmsApiResponse::invalidArgumentResponse();
+    }
+
+    const auto result = deviceService.deleteChannelTour(channelId, tourId);
+    return ptzControlResponse(result.status);
 });
 }
