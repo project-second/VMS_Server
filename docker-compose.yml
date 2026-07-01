@@ -7,7 +7,7 @@ services:
     working_dir: /workspace
     command: bash -lc "pg_ctlcluster 16 main start && exec bash"
     ports:
-      - "8080:80"
+      - "8080:8080"
       - "5432:5432"
       - "8554:8554"
     volumes:

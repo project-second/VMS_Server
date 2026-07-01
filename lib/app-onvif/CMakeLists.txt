@@ -67,6 +67,7 @@ add_custom_command(
 
 add_library(${PROJECT_NAME} STATIC
     OnvifDiscoveryService.cpp
+    OnvifDiscoveryCompat.cpp
     OnvifDeviceClient.cpp
     OnvifMediaClient.cpp
     OnvifPtzClient.cpp
