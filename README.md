@@ -181,7 +181,8 @@ ONVIF provisioning과 향후 bulk upsert를 위해 다음 unique/index도 함께
 1. 패키지 압축 해제
 2. db/migrations/*.sql 적용
 3. resources/application.yml의 DB 연결 정보 확인
-4. ./bin/vms_server 실행
+4. ./bin/vms_server create-admin --id admin --name 관리자 실행
+5. ./bin/vms_server 실행
 ```
 
 ## 애플리케이션 설정
@@ -267,3 +268,34 @@ struct AppRuntimeConfig {
 ```
 
 선택 설정은 두 번째 값을 `false`로 둡니다. 기본값이 있으면 세 번째 값에 넣고, 기본값 없이 생략 가능하면 `std::nullopt`를 사용합니다.
+
+## 초기 관리자 생성
+
+일반 회원가입과 별도로 `create-admin` 명령을 사용해 최초 관리자 계정을 한 번만 생성할 수 있습니다. 먼저 DB migration을 적용하고 `resources/application.yml`의 DB 연결 정보를 확인합니다.
+
+개발 빌드에서는 프로젝트 루트에서 다음과 같이 실행합니다.
+
+```bash
+./build/vms_server create-admin \
+  --id admin \
+  --name 관리자
+```
+
+배포 패키지에서는 패키지 루트에서 다음과 같이 실행합니다.
+
+```bash
+./bin/vms_server create-admin \
+  --id admin \
+  --name 관리자
+```
+
+명령을 실행하면 비밀번호와 확인 비밀번호를 차례로 입력받습니다. 비밀번호는 화면에 표시되지 않으며 명령행 인자로 전달하지 않습니다.
+
+생성 과정은 다음 작업을 하나의 DB 트랜잭션으로 처리합니다.
+
+- 기존 관리자 존재 여부 확인 및 중복 생성 거부
+- 기존 로그인과 동일한 방식으로 비밀번호 해싱
+- 활성화된 사용자와 `APPROVED` 승인 내역 생성
+- `ADMIN` 역할 부여
+
+동시에 여러 생성 명령이 실행되어도 최초 한 건만 생성됩니다. 관리자가 이미 존재하거나 같은 로그인 ID가 사용 중이면 새 계정을 만들지 않고 오류를 반환합니다.

@@ -29,6 +29,62 @@ mapper:
           NOW()
         )
 
+    - id: createInitialAdmin
+      sequence: select
+      query: >
+        WITH bootstrap_lock AS (
+          SELECT pg_advisory_xact_lock(7667830472404926464) AS locked
+        ),
+        state AS (
+          SELECT
+            EXISTS (
+              SELECT 1
+              FROM user_roles ur
+              INNER JOIN roles r ON r.role_id = ur.role_id
+              WHERE r.role_code = 'ADMIN'
+            ) AS admin_exists,
+            EXISTS (
+              SELECT 1 FROM users WHERE login_id = #{login_id}
+            ) AS login_id_exists,
+            EXISTS (
+              SELECT 1 FROM roles WHERE role_code = 'ADMIN'
+            ) AS role_exists
+          FROM bootstrap_lock
+        ),
+        new_user AS (
+          INSERT INTO users (login_id, name, pw_hash, is_active)
+          SELECT #{login_id}, #{name}, #{pw_hash}, true
+          FROM state
+          WHERE NOT admin_exists
+            AND NOT login_id_exists
+            AND role_exists
+          RETURNING user_id
+        ),
+        new_approval AS (
+          INSERT INTO user_approvals (
+            user_id, status, requested_at, reviewed_by, reviewed_at
+          )
+          SELECT user_id, 'APPROVED', NOW(), user_id, NOW()
+          FROM new_user
+          RETURNING user_id
+        ),
+        new_role AS (
+          INSERT INTO user_roles (
+            user_id, role_id, assinged_by, assinged_at
+          )
+          SELECT nu.user_id, r.role_id, nu.user_id, NOW()
+          FROM new_user nu
+          INNER JOIN new_approval na ON na.user_id = nu.user_id
+          INNER JOIN roles r ON r.role_code = 'ADMIN'
+          RETURNING user_id
+        )
+        SELECT
+          EXISTS (SELECT 1 FROM new_role) AS created,
+          state.admin_exists,
+          state.login_id_exists,
+          state.role_exists
+        FROM state
+
     - id: getUserByLoginId
       sequence: select
       query: >

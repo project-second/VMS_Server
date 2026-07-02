@@ -87,6 +87,10 @@ public:
      */
     TypedRowSet selectTyped(const std::string& statement, const ParamMap& params);
 
+    /** Runs a mapped SELECT after acquiring a transaction-scoped advisory lock. */
+    TypedRowSet selectTypedWithAdvisoryLock(
+        std::int64_t lockId, const std::string& statement, const ParamMap& params);
+
     /**
      * @brief DELETE 문을 실행한다.
      * @param statement 실행할 statement 식별자(`mapperId.statementId`).

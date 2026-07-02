@@ -145,4 +145,20 @@ DbTemplate::TypedRowSet select(const std::string& statement, const DbTemplate::P
     }
 }
 
+DbTemplate::TypedRowSet selectWithAdvisoryLock(
+    std::int64_t lockId,
+    const std::string& statement,
+    const DbTemplate::ParamMap& params) {
+    DbTemplate::TypedRowSet rows;
+    DbTemplate* db = instance();
+    if (db == nullptr) return rows;
+    std::lock_guard<std::mutex> lock(db_exec_mutex());
+    try {
+        return db->selectTypedWithAdvisoryLock(lockId, statement, params);
+    } catch (const std::exception& e) {
+        log_error("[DB] locked select failed. statement=", statement, " reason=", e.what());
+        return rows;
+    }
+}
+
 } // namespace AppDb

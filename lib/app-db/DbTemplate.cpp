@@ -75,6 +75,23 @@ DbTemplate::TypedRowSet DbTemplate::selectTyped(const std::string& statement, co
     return toTypedRowSet(result);
 }
 
+DbTemplate::TypedRowSet DbTemplate::selectTypedWithAdvisoryLock(
+    std::int64_t lockId,
+    const std::string& statement,
+    const ParamMap& params) {
+    const std::string query = getQuery(statement, "select");
+    const PreparedSql prepared = toPrepared(query);
+
+    pqxx::work tx(cx_);
+    pqxx::params lockParams;
+    lockParams.append(lockId);
+    tx.exec_params("SELECT pg_advisory_xact_lock($1)", lockParams);
+    pqxx::result result = tx.exec_params(prepared.sql, buildParams(prepared.orderedParams, params));
+    tx.commit();
+
+    return toTypedRowSet(result);
+}
+
 void DbTemplate::deleteQ(const std::string& statement, const ParamMap& params) {
     executeMutation(statement, "delete", params);
 }

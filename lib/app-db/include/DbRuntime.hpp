@@ -14,6 +14,8 @@ bool insert(const std::string& statement, const DbTemplate::ParamMap& params);
 bool update(const std::string& statement, const DbTemplate::ParamMap& params);
 bool remove(const std::string& statement, const DbTemplate::ParamMap& params);
 DbTemplate::TypedRowSet select(const std::string& statement, const DbTemplate::ParamMap& params);
+DbTemplate::TypedRowSet selectWithAdvisoryLock(
+    std::int64_t lockId, const std::string& statement, const DbTemplate::ParamMap& params);
 
 } // namespace AppDb
 
