@@ -496,6 +496,66 @@ OnvifDiscoveryService
 
 ONVIF Discovery는 UDP multicast `239.255.255.250:3702`를 사용한다. 따라서 테스트 환경의 네트워크 계층이 multicast 송수신을 허용해야 한다.
 
+### 필수 확인: 호스트 방화벽
+
+ONVIF Discovery 요청은 `239.255.255.250:3702`로 multicast 전송되지만, 장비의
+`ProbeMatches` 응답은 요청을 보낸 클라이언트의 임시 UDP 포트로 unicast 전송된다.
+따라서 UDP 3702 목적지 포트만 허용해서는 Discovery가 동작하지 않을 수 있다.
+
+특히 UFW의 기본 incoming 정책이 `deny`인 Linux 호스트에서는 multicast 요청이
+정상 송신되고 `tcpdump`에도 응답이 보이지만, 응답이 애플리케이션 소켓에 전달되지
+않아 다음과 같이 장비 0대로 표시될 수 있다.
+
+```text
+[ONVIF] discovery found 0 device(s)
+```
+
+프로젝트 설치 및 운영 환경 구성 시 카메라 네트워크에서 오는 WS-Discovery 응답을
+반드시 허용해야 한다. 단일 장비를 대상으로 확인할 때는 다음처럼 제한적으로 허용한다.
+
+```bash
+sudo ufw allow in on wlp4s0 proto udp \
+  from 192.168.0.42 port 3702 to any \
+  comment 'ONVIF Discovery replies'
+```
+
+카메라 전용 subnet 또는 VLAN 전체를 허용할 때는 다음과 같이 구성한다. 실제
+인터페이스 이름과 subnet은 배포 환경에 맞게 변경한다.
+
+```bash
+sudo ufw allow in on wlp4s0 proto udp \
+  from 192.168.0.0/24 port 3702 to any \
+  comment 'ONVIF Discovery replies'
+```
+
+이 규칙은 카메라 측 **source UDP port 3702**에서 클라이언트의 임시 목적지 포트로
+오는 응답을 허용한다. `from any`로 열지 말고 카메라 전용 인터페이스와 subnet으로
+범위를 제한하는 것을 권장한다.
+
+현재 방화벽 상태는 다음 명령으로 확인한다.
+
+```bash
+sudo ufw status verbose
+sudo nft list ruleset
+sudo iptables -nvL INPUT
+```
+
+`tcpdump`에는 응답이 보이는데 프로그램에 수신 로그가 없다면 패킷 캡처만으로
+방화벽 통과를 판단해서는 안 된다. `tcpdump`는 INPUT 방화벽에서 폐기되기 전의
+패킷도 표시할 수 있다. 다음 순서로 확인한다.
+
+1. 프로그램 로그의 active UDP port를 확인한다.
+2. `tcpdump`에서 응답의 목적지 port가 active port와 같은지 확인한다.
+3. 같은데도 `received` 로그가 없다면 UFW/nftables INPUT 규칙을 확인한다.
+4. 허용 규칙 추가 후 `discovery found 1 device(s)`가 출력되는지 확인한다.
+
+조각화된 응답을 점검해야 할 때는 후속 IP fragment도 보이도록 캡처한다.
+
+```bash
+sudo tcpdump -ni wlp4s0 -vv -XX \
+  'host 192.168.0.42 and (udp port 3702 or (ip[6:2] & 0x1fff != 0))'
+```
+
 Linux Docker에서 실제 LAN 장비를 찾을 때는 일반 bridge network보다 host network가 단순하다.
 
 ```bash
