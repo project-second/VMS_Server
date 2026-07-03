@@ -8,15 +8,13 @@ find_package(Threads REQUIRED)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
     gstreamer-1.0
     gstreamer-app-1.0
-    gstreamer-video-1.0
-    gstreamer-rtp-1.0
-    gstreamer-rtsp-1.0
-    gstreamer-rtsp-server-1.0
 )
 
-add_library(${PROJECT_NAME} STATIC
-    MediaLiveStreamService.cpp
+file(GLOB SOURCES 
+	*.cpp
 )
+
+add_library(${PROJECT_NAME} STATIC ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/include
