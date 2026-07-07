@@ -1,5 +1,4 @@
-#ifndef __CAMERAMANAGER_H__
-#define __CAMERAMANAGER_H__
+#pragma once
 
 #include "CameraWorker.h"
 #include "RecordingSegmentStore.h"
@@ -10,6 +9,12 @@
 #include <string>
 #include <vector>
 
+// GStreamer 녹화 엔진이 카메라 1대를 실행하기 위해 필요한 최소 설정이다.
+//
+// 주의:
+// - 이 구조체는 ONVIF MediaProfile이 아니다.
+// - profile token, PTZ token, GetStreamUri 과정은 ONVIF/DB/서비스 계층에서 관리한다.
+// - 이 모듈은 최종적으로 선택된 RTSP URI만 받아 녹화한다.
 struct CameraConfig {
     std::string camera_id;
     std::string rtsp_uri;
@@ -18,14 +23,6 @@ struct CameraConfig {
 };
 
 class CameraManager {
-private:
-    bool running_ = false;
-
-    mutable std::mutex mutex_;
-    std::vector<std::unique_ptr<CameraWorker>> workers_;
-
-    RecordingSegmentStore segment_store_;
-
 public:
     CameraManager() = default;
     ~CameraManager();
@@ -52,6 +49,12 @@ public:
 
 private:
     bool has_camera_id_locked(const std::string& camera_id) const;
-};
 
-#endif // __CAMERAMANAGER_H__
+private:
+    bool running_ = false;
+
+    mutable std::mutex mutex_;
+    std::vector<std::unique_ptr<CameraWorker>> workers_;
+
+    RecordingSegmentStore segment_store_;
+};

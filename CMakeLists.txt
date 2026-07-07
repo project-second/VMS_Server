@@ -26,6 +26,7 @@ target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/include/vms-api
     ${CMAKE_SOURCE_DIR}/include/onvif-manager
+    ${CMAKE_SOURCE_DIR}/include/media
     ${CMAKE_SOURCE_DIR}/third_party
     # ${OpenCV_INCLUDE_DIRS}
 )

@@ -15,12 +15,16 @@
 #include "VmsUserRepository.h"
 #include "VmsUserService.h"
 #include "StringHelpers.h"
+#include "CameraManager.h"
+
+#include <gst/gst.h>
 
 #include <chrono>
 #include <filesystem>
 #include <iostream>
 #include <string>
 #include <thread>
+#include <csignal>
 
 #if defined(__unix__) || defined(__APPLE__)
 #include <termios.h>
@@ -28,6 +32,15 @@
 #endif
 
 namespace {
+
+volatile std::sig_atomic_t g_shutdown_requested = 0;
+
+void handle_shutdown_signal(int signal_number) {
+    // 1. signal handler에서는 종료 플래그만 설정
+    if (signal_number == SIGINT || signal_number == SIGTERM) {
+        g_shutdown_requested = 1;
+    }
+}
 
 void printUsage(const char* program) {
     std::cerr
@@ -157,6 +170,16 @@ int main(int argc, char const* argv[]) {
 
     AppDb::configure(config.dbConninfo, config.dbMapperPath);
 
+    // GStreamer 초기화
+    gst_init(nullptr, nullptr);
+
+    // CameraManager 생성
+    CameraManager camera_menager;
+
+    // 종료 신호 핸들러 등록
+    std::signal(SIGINT, handle_shutdown_signal);
+    std::signal(SIGTERM, handle_shutdown_signal);
+
     HttpServer server(serverHost, port, server_threads);
     VmsUserRepository userRepository;
     VmsUserService userService(userRepository);
@@ -179,9 +202,13 @@ int main(int argc, char const* argv[]) {
 
     onvifProvisioning.start();
 
-    while (true) {
-        std::this_thread::sleep_for(std::chrono::hours(24));
-    }
+    // 종료 신호 대기
+    while (g_shutdown_requested == 0) { g_usleep(100 * 1000); }
+
+    // 종료 처리
+    std::cout << std::endl;
+    std::cout << "Shutdown signal received" << std::endl;
+    std::cout << "Stopping CameraManager..." << std::endl;
 
     return 0;
 }

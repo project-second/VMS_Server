@@ -23,6 +23,10 @@ file(GLOB_RECURSE ONVIF_WSDL_DEPENDENCIES CONFIGURE_DEPENDS
     ${CMAKE_CURRENT_SOURCE_DIR}/external/*.xsd
 )
 
+file(GLOB SOURCES 
+	*.cpp
+)
+
 set(ONVIF_GSOAP_GENERATED_SOURCES
     ${ONVIF_GSOAP_GENERATED_DIR}/soapC.cpp
     ${ONVIF_GSOAP_GENERATED_DIR}/soapClient.cpp
@@ -66,12 +70,7 @@ add_custom_command(
 )
 
 add_library(${PROJECT_NAME} STATIC
-    OnvifDiscoveryService.cpp
-    OnvifDiscoveryCompat.cpp
-    OnvifDeviceClient.cpp
-    OnvifMediaClient.cpp
-    OnvifPtzClient.cpp
-    OnvifSoapContext.cpp
+    ${SOURCES}
     ${ONVIF_GSOAP_GENERATED_SOURCES}
     ${ONVIF_GSOAP_PLUGIN_DIR}/wsddapi.c
     ${ONVIF_GSOAP_PLUGIN_DIR}/wsaapi.c
@@ -96,6 +95,7 @@ target_include_directories(${PROJECT_NAME} PUBLIC
 )
 
 target_include_directories(${PROJECT_NAME} PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${ONVIF_GSOAP_GENERATED_DIR}
     ${ONVIF_GSOAP_IMPORT_DIR}
     ${ONVIF_GSOAP_PLUGIN_DIR}

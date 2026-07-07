@@ -9,6 +9,7 @@
 #include "OnvifMediaClient.h"
 #include "OnvifProvisioningRepository.h"
 #include "OnvifProvisioningTypes.h"
+#include "CameraManager.h"
 
 #include <atomic>
 #include <memory>

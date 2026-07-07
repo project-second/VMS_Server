@@ -1,5 +1,4 @@
 #include "OnvifDiscoveryService.h"
-#include "OnvifDiscoveryCompat.h"
 
 #include <algorithm>
 #include <chrono>
@@ -32,6 +31,7 @@ struct OnvifDiscoveryEventAccess {
 namespace {
 
 constexpr const char* kDiscoveryEndpoint = "soap.udp://239.255.255.250:3702";
+constexpr const char* kOnvifNetworkVideoTransmitter = "\"http://www.onvif.org/ver10/network/wsdl\":NetworkVideoTransmitter";
 
 // 하나의 gSOAP callback set을 active Probe, Resolve, passive listener가 공유한다.
 // soap->user에 이 상태를 넣어 callback이 어느 흐름에서 호출됐는지 구분한다.
@@ -263,7 +263,38 @@ void OnvifDiscoveryService::stop() {
 }
 
 std::vector<OnvifDiscoveredDevice> OnvifDiscoveryService::discoverOnce() {
-    return discoverOnvifDevicesCompat(options_);
+    WsddEventState state{WsddStateKind::Probe};
+
+    auto context = makeSoapContext();
+    context->user = &state;
+
+    // ProbeMatches는 Probe를 보낸 UDP socket으로 돌아오므로 같은 context로 bind/send/listen한다.
+    const SOAP_SOCKET socket = soap_bind(context.get(), nullptr, options_.listenPort, 100);
+    if (!soap_valid_socket(socket)) {
+        LogSync::error("[ONVIF] discovery listener bind failed: ", *soap_faultstring(context.get()));
+        return {};
+    }
+
+    const char* id = soap_wsa_rand_uuid(context.get());
+    state.messageId = copyString(id);
+
+    if (soap_wsdd_Probe(context.get(), SOAP_WSDD_ADHOC, SOAP_WSDD_TO_TS, kDiscoveryEndpoint,
+            id, nullptr, kOnvifNetworkVideoTransmitter, nullptr, nullptr) != SOAP_OK) {
+        LogSync::error("[ONVIF] discovery probe failed: ", *soap_faultstring(context.get()));
+        soap_closesock(context.get());
+        return {};
+    }
+
+    const int result = soap_wsdd_listen(context.get(), listenTimeoutMicros(options_.listenTimeout));
+    soap_closesock(context.get());
+
+    if (result != SOAP_OK) {
+        LogSync::error("[ONVIF] discovery listen failed: ", *soap_faultstring(context.get()));
+        return {};
+    }
+
+    LogSync::info("[ONVIF] discovery found ", state.devices.size(), " device(s)");
+    return state.devices;
 }
 
 std::optional<OnvifDiscoveredDevice> OnvifDiscoveryService::resolveOnce(const std::string& endpointReference) {

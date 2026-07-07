@@ -2,8 +2,6 @@
 
 #include <iostream>
 
-#include <iostream>
-
 CameraManager::~CameraManager() {
     stop_all();
 }
@@ -25,7 +23,14 @@ bool CameraManager::add_camera(const CameraConfig& config) {
         return false;
     }
 
+    if (config.split_seconds <= 0) {
+        std::cerr << "split_seconds must be positive" << std::endl;
+        return false;
+    }
+
     // 2. CameraWorker 생성
+    //    ONVIF profile token 같은 외부 식별자는 여기로 전달하지 않는다.
+    //    이 계층은 최종 RTSP URI를 받은 뒤 녹화만 담당한다.
     auto worker = std::make_unique<CameraWorker>(
         config.camera_id,
         config.rtsp_uri,
@@ -53,8 +58,10 @@ bool CameraManager::add_camera(const CameraConfig& config) {
 
         workers_.push_back(std::move(worker));
 
-        std::cout << "Added camera: "
+        std::cout << "Added camera recording config: "
                   << config.camera_id
+                  << ", rtsp_uri=" << config.rtsp_uri
+                  << ", split_seconds=" << config.split_seconds
                   << std::endl;
     }
 
