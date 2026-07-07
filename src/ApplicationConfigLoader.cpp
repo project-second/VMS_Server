@@ -17,6 +17,7 @@ struct Binding {
     std::optional<std::string> default_value;
     std::string AppRuntimeConfig::* string_field;
     int AppRuntimeConfig::* int_field;
+    bool AppRuntimeConfig::* bool_field;
 };
 
 YAML::Node findChild(const YAML::Node& node, const std::string& key) {
@@ -67,6 +68,18 @@ bool parseInt(const std::string& value, int& out) {
     }
 }
 
+bool parseBool(const std::string& value, bool& out) {
+    if (value == "true" || value == "yes" || value == "on" || value == "1") {
+        out = true;
+        return true;
+    }
+    if (value == "false" || value == "no" || value == "off" || value == "0") {
+        out = false;
+        return true;
+    }
+    return false;
+}
+
 bool applyRuntimeField(const Binding& binding, const std::string& value, AppRuntimeConfig& config) {
     if (binding.string_field != nullptr) {
         config.*(binding.string_field) = value;
@@ -80,6 +93,15 @@ bool applyRuntimeField(const Binding& binding, const std::string& value, AppRunt
             return false;
         }
         config.*(binding.int_field) = parsed;
+    }
+
+    if (binding.bool_field != nullptr) {
+        bool parsed = false;
+        if (!parseBool(value, parsed)) {
+            LogSync::error("[Config] invalid boolean key: ", binding.path);
+            return false;
+        }
+        config.*(binding.bool_field) = parsed;
     }
 
     return true;
@@ -120,19 +142,22 @@ bool applyBinding(const YAML::Node& root, const Binding& binding, AppRuntimeConf
 
 const std::vector<Binding>& bindings() {
     static const std::vector<Binding> items = {
-        {"app.db.conninfo", true, std::nullopt, &AppRuntimeConfig::dbConninfo, nullptr},
-        {"app.db.mapperPath", false, "resources/db", &AppRuntimeConfig::dbMapperPath, nullptr},
+        {"app.db.conninfo", true, std::nullopt, &AppRuntimeConfig::dbConninfo, nullptr, nullptr},
+        {"app.db.mapperPath", false, "resources/db", &AppRuntimeConfig::dbMapperPath, nullptr, nullptr},
 
-        {"app.http.server.host", false, "0.0.0.0", &AppRuntimeConfig::serverHost, nullptr},
-        {"app.http.server.port", false, "8080", nullptr, &AppRuntimeConfig::serverPort},
-        {"app.http.server.threads", false, "8", nullptr, &AppRuntimeConfig::serverThreads},
-        {"app.http.clientPool.threads", false, "8", nullptr, &AppRuntimeConfig::clientPoolThreads},
-        {"app.http.clientPool.maxQueue", false, "500", nullptr, &AppRuntimeConfig::clientPoolMaxQueue},
+        {"app.http.server.host", false, "0.0.0.0", &AppRuntimeConfig::serverHost, nullptr, nullptr},
+        {"app.http.server.port", false, "8080", nullptr, &AppRuntimeConfig::serverPort, nullptr},
+        {"app.http.server.threads", false, "8", nullptr, &AppRuntimeConfig::serverThreads, nullptr},
+        {"app.http.clientPool.threads", false, "8", nullptr, &AppRuntimeConfig::clientPoolThreads, nullptr},
+        {"app.http.clientPool.maxQueue", false, "500", nullptr, &AppRuntimeConfig::clientPoolMaxQueue, nullptr},
 
         {"app.onvif.discovery.intervalMs", false, "300000", nullptr,
-            &AppRuntimeConfig::onvifDiscoveryIntervalMs},
+            &AppRuntimeConfig::onvifDiscoveryIntervalMs, nullptr},
+        {"app.onvif.soapLog.enabled", false, "false", nullptr, nullptr,
+            &AppRuntimeConfig::onvifSoapLogEnabled},
+        {"app.onvif.soapLog.dir", false, "/tmp", &AppRuntimeConfig::onvifSoapLogDir, nullptr, nullptr},
         {"app.mediamtx.playbackSyncIntervalMs", false, "30000", nullptr,
-            &AppRuntimeConfig::mediaMtxPlaybackSyncIntervalMs},
+            &AppRuntimeConfig::mediaMtxPlaybackSyncIntervalMs, nullptr},
     };
 
     return items;

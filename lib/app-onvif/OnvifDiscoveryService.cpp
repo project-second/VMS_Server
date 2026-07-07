@@ -11,6 +11,7 @@
 
 #include "IntervalTimer.h"
 #include "LogSync.h"
+#include "OnvifSoapContext.h"
 
 #include "wsddapi.h"
 #include "wsaapi.h"
@@ -141,11 +142,14 @@ void configureSoapContext(soap* context) {
 
 std::unique_ptr<soap, void (*)(soap*)> makeSoapContext() {
     soap* context = soap_new1(SOAP_IO_UDP | SOAP_XML_IGNORENS);
+
     configureSoapContext(context);
+    applyOnvifSoapLogging(context, "discovery");
     return {context, [](soap* item) {
         if (item == nullptr) {
             return;
         }
+        removeOnvifSoapLogging(item);
         soap_destroy(item);
         soap_end(item);
         soap_free(item);

@@ -13,6 +13,8 @@ struct AppRuntimeConfig {
     int clientPoolThreads = 8;
     int clientPoolMaxQueue = 500;
     int onvifDiscoveryIntervalMs = 300000;
+    bool onvifSoapLogEnabled = false;
+    std::string onvifSoapLogDir = "/tmp";
     int mediaMtxPlaybackSyncIntervalMs = 30000;
 };
 

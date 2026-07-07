@@ -3,6 +3,7 @@
 #include "DbRuntime.hpp"
 #include "HttpServer.h"
 #include "OnvifDeviceProvisioningService.h"
+#include "OnvifSoapContext.h"
 #include "ThreadPool.hpp"
 #include "VmsAdminBootstrap.h"
 #include "VmsAdminController.h"
@@ -167,6 +168,11 @@ int main(int argc, char const* argv[]) {
     const std::string serverHost = config.serverHost;
     const int port = config.serverPort;
     const int server_threads = config.serverThreads;
+
+    configureOnvifSoapLogging(OnvifSoapLogOptions{
+        .enabled = config.onvifSoapLogEnabled,
+        .directory = config.onvifSoapLogDir,
+    });
 
     AppDb::configure(config.dbConninfo, config.dbMapperPath);
 
