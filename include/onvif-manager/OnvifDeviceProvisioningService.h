@@ -10,6 +10,7 @@
 #include "OnvifProvisioningRepository.h"
 #include "OnvifProvisioningTypes.h"
 #include "CameraManager.h"
+#include "MediaService.h"
 
 #include <atomic>
 #include <memory>
@@ -34,12 +35,17 @@ private:
     // TODO: 장비별 인증 옵션/credential을 관리하게 되면 client 생성 정책을 여기서 정리한다.
     std::vector<std::unique_ptr<OnvifDeviceClient>> deviceClients;
     OnvifProvisioningRepository repository;
+    MediaService mediaService;
 
     std::thread provisioningThread;
     std::atomic<bool> running{false};
 
 public:
-    OnvifDeviceProvisioningService(ThreadPool& tp, int discoveryIntervalMs);
+    OnvifDeviceProvisioningService(
+        ThreadPool& tp,
+        CameraManager& cameraManager,
+        int discoveryIntervalMs,
+        MediaRecordingOptions recordingOptions = {});
     ~OnvifDeviceProvisioningService();
 
     // Discovery와 provisioning loop를 시작한다.

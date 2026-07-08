@@ -33,6 +33,13 @@ app:
       # 고정 IP 설정 후 특정 카메라만 타겟팅이 필요할 때 해당 IP를 기입하세요. (예: "192.168.0.22")
       unicastTargets: ""
 
+  media:
+    recording:
+      # ONVIF GetStreamUri로 얻은 RTSP를 녹화할 segment 저장 루트입니다.
+      # 실제 파일은 <rootDir>/<camera_id>/%05d.mp4 형태로 생성됩니다.
+      rootDir: "recordings/onvif"
+      splitSeconds: 5
+
   #   pullMessages:
   #     maxPollCount: 0
 

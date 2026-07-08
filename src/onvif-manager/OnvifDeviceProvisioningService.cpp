@@ -1,7 +1,11 @@
 #include "OnvifDeviceProvisioningService.h"
 
-OnvifDeviceProvisioningService::OnvifDeviceProvisioningService(ThreadPool& tp, int discoveryIntervalMs) 
-    : threadPool{tp} {
+OnvifDeviceProvisioningService::OnvifDeviceProvisioningService(
+    ThreadPool& tp,
+    CameraManager& cameraManager,
+    int discoveryIntervalMs,
+    MediaRecordingOptions recordingOptions)
+    : threadPool{tp}, mediaService{cameraManager, repository, std::move(recordingOptions)} {
     discoveryService.setDiscoveryInterval(std::chrono::milliseconds(discoveryIntervalMs));
 }
 
@@ -82,9 +86,7 @@ void OnvifDeviceProvisioningService::provisioningLoop() {
             }
         }
 
-        if (!results.empty() && !repository.upsert(results)) {
-            LogSync::error("[Provisioning] failed to upsert provisioning results");
-        }
+        mediaService.addCamera(results);
 
         std::this_thread::sleep_for(std::chrono::seconds(5));
     }

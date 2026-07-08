@@ -15,6 +15,8 @@ struct AppRuntimeConfig {
     int onvifDiscoveryIntervalMs = 300000;
     bool onvifSoapLogEnabled = false;
     std::string onvifSoapLogDir = "/tmp";
+    std::string mediaRecordingRootDir = "recordings/onvif";
+    int mediaRecordingSplitSeconds = 5;
     int mediaMtxPlaybackSyncIntervalMs = 30000;
 };
 

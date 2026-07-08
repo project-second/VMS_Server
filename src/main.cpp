@@ -200,12 +200,18 @@ int main(int argc, char const* argv[]) {
     ThreadPool onvifThreadPool;
     OnvifDeviceProvisioningService onvifProvisioning(
         onvifThreadPool,
-        config.onvifDiscoveryIntervalMs);
+        camera_menager,
+        config.onvifDiscoveryIntervalMs,
+        MediaRecordingOptions{
+            .recordRootDir = config.mediaRecordingRootDir,
+            .splitSeconds = config.mediaRecordingSplitSeconds,
+        });
 
     if (!server.start()) {
         return 1;
     }
 
+    camera_menager.start_all();
     onvifProvisioning.start();
 
     // 종료 신호 대기
@@ -214,7 +220,10 @@ int main(int argc, char const* argv[]) {
     // 종료 처리
     std::cout << std::endl;
     std::cout << "Shutdown signal received" << std::endl;
+    std::cout << "Stopping ONVIF provisioning..." << std::endl;
+    onvifProvisioning.stop();
     std::cout << "Stopping CameraManager..." << std::endl;
+    camera_menager.stop_all();
 
     return 0;
 }

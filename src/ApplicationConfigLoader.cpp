@@ -156,6 +156,11 @@ const std::vector<Binding>& bindings() {
         {"app.onvif.soapLog.enabled", false, "false", nullptr, nullptr,
             &AppRuntimeConfig::onvifSoapLogEnabled},
         {"app.onvif.soapLog.dir", false, "/tmp", &AppRuntimeConfig::onvifSoapLogDir, nullptr, nullptr},
+        {"app.media.recording.rootDir", false, "recordings/onvif", &AppRuntimeConfig::mediaRecordingRootDir,
+            nullptr, nullptr},
+        {"app.media.recording.splitSeconds", false, "5", nullptr,
+            &AppRuntimeConfig::mediaRecordingSplitSeconds, nullptr},
+
         {"app.mediamtx.playbackSyncIntervalMs", false, "30000", nullptr,
             &AppRuntimeConfig::mediaMtxPlaybackSyncIntervalMs, nullptr},
     };
