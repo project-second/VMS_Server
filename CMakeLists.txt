@@ -85,6 +85,84 @@ install(DIRECTORY ${CMAKE_SOURCE_DIR}/db
     DESTINATION .
 )
 
+set(VMS_GSTREAMER_PLUGIN_DIR /usr/lib/x86_64-linux-gnu/gstreamer-1.0 CACHE PATH "GStreamer plugin directory to package")
+set(VMS_GSTREAMER_PLUGIN_SCANNER /usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner CACHE FILEPATH "GStreamer plugin scanner to package")
+
+set(VMS_GSTREAMER_PLUGIN_FILES
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstrtsp.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstrtp.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstvideoparsersbad.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstmultifile.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstlibav.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstvideoconvertscale.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstcoreelements.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstapp.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstisomp4.so
+)
+
+foreach(plugin_file IN LISTS VMS_GSTREAMER_PLUGIN_FILES)
+    if(EXISTS "${plugin_file}")
+        install(FILES "${plugin_file}" DESTINATION lib/gstreamer-1.0)
+    else()
+        message(WARNING "GStreamer plugin not found and will not be packaged: ${plugin_file}")
+    endif()
+endforeach()
+
+if(EXISTS "${VMS_GSTREAMER_PLUGIN_SCANNER}")
+    install(PROGRAMS "${VMS_GSTREAMER_PLUGIN_SCANNER}" DESTINATION libexec/gstreamer-1.0)
+else()
+    message(WARNING "GStreamer plugin scanner not found and will not be packaged: ${VMS_GSTREAMER_PLUGIN_SCANNER}")
+endif()
+
+install(CODE [[
+    set(gst_plugin_files
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstrtsp.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstrtp.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstvideoparsersbad.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstmultifile.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstlibav.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstvideoconvertscale.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstcoreelements.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstapp.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstisomp4.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner"
+    )
+
+    set(existing_gst_plugin_files)
+    foreach(plugin_file IN LISTS gst_plugin_files)
+        if(EXISTS "${plugin_file}")
+            list(APPEND existing_gst_plugin_files "${plugin_file}")
+        endif()
+    endforeach()
+
+    if(existing_gst_plugin_files)
+        file(GET_RUNTIME_DEPENDENCIES
+            LIBRARIES ${existing_gst_plugin_files}
+            RESOLVED_DEPENDENCIES_VAR gst_resolved_deps
+            UNRESOLVED_DEPENDENCIES_VAR gst_unresolved_deps
+            POST_EXCLUDE_REGEXES
+                "/lib.*/ld-linux.*"
+                "/lib.*/libc\\.so.*"
+                "/lib.*/libm\\.so.*"
+                "/lib.*/libpthread\\.so.*"
+                "/lib.*/librt\\.so.*"
+                "/lib.*/libdl\\.so.*"
+        )
+
+        foreach(dep IN LISTS gst_resolved_deps)
+            file(INSTALL
+                DESTINATION "${CMAKE_INSTALL_PREFIX}/lib"
+                TYPE SHARED_LIBRARY
+                FOLLOW_SYMLINK_CHAIN
+                FILES "${dep}")
+        endforeach()
+
+        if(gst_unresolved_deps)
+            message(WARNING "Unresolved GStreamer runtime dependencies: ${gst_unresolved_deps}")
+        endif()
+    endif()
+]])
+
 set(CPACK_PACKAGE_NAME "${PROJECT_NAME}")
 set(CPACK_PACKAGE_VENDOR "Linear CCTV")
 set(CPACK_PACKAGE_CONTACT "Linear CCTV")

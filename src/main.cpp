@@ -21,6 +21,7 @@
 #include <gst/gst.h>
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <string>
@@ -35,6 +36,29 @@
 namespace {
 
 volatile std::sig_atomic_t g_shutdown_requested = 0;
+
+void configure_packaged_gstreamer_environment(const char* argv0) {
+    if (argv0 == nullptr) {
+        return;
+    }
+
+    std::error_code error;
+    const std::filesystem::path executable = std::filesystem::canonical(argv0, error);
+    if (error) {
+        return;
+    }
+
+    const std::filesystem::path installRoot = executable.parent_path().parent_path();
+    const std::filesystem::path pluginPath = installRoot / "lib" / "gstreamer-1.0";
+    const std::filesystem::path scannerPath = installRoot / "libexec" / "gstreamer-1.0" / "gst-plugin-scanner";
+
+    if (std::filesystem::exists(pluginPath)) {
+        setenv("GST_PLUGIN_PATH", pluginPath.c_str(), 1);
+    }
+    if (std::filesystem::exists(scannerPath)) {
+        setenv("GST_PLUGIN_SCANNER", scannerPath.c_str(), 1);
+    }
+}
 
 void handle_shutdown_signal(int signal_number) {
     // 1. signal handler에서는 종료 플래그만 설정
@@ -175,6 +199,9 @@ int main(int argc, char const* argv[]) {
     });
 
     AppDb::configure(config.dbConninfo, config.dbMapperPath);
+
+    // 패키지 내부에 함께 배포한 GStreamer plugin을 우선 사용한다.
+    configure_packaged_gstreamer_environment(argv[0]);
 
     // GStreamer 초기화
     gst_init(nullptr, nullptr);
