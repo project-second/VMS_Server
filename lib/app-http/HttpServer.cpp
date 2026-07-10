@@ -140,6 +140,11 @@ HttpServer::~HttpServer() {
     stop();
 }
 
+void HttpServer::setMiddleware(Middleware middleware) {
+    std::lock_guard<std::mutex> lock(routes_mutex_);
+    middleware_ = std::move(middleware);
+}
+
 bool HttpServer::addRoute(HttpMethod method, std::string path, Handler handler) {
     if (!handler) return false;
 
@@ -682,6 +687,26 @@ Http::Response HttpServer::dispatch(const Http::Request& req) {
     try {
         Http::Request req_with_params = req;
         req_with_params.path_params = std::move(path_params);
+
+        Middleware middleware;
+        {
+            std::lock_guard<std::mutex> lock(routes_mutex_);
+            middleware = middleware_;
+        }
+        if (middleware) {
+            const auto rejection = middleware(req_with_params);
+            if (rejection) {
+                Http::Response response = *rejection;
+                if (response.status_code <= 0) {
+                    response.status_code = 500;
+                }
+                if (response.reason.empty()) {
+                    response.reason = default_reason_phrase(response.status_code);
+                }
+                return response;
+            }
+        }
+
         auto response = handler(req_with_params);
         if (response.status_code <= 0) {
             response.status_code = 200;

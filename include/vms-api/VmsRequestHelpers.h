@@ -25,6 +25,11 @@ inline std::optional<std::string> extractBearerToken(const Http::Request& req) {
     return token;
 }
 
+inline std::optional<std::int64_t> authenticatedUserId(const Http::Request& req) {
+    if (!req.auth.authenticated || req.auth.userId <= 0) return std::nullopt;
+    return req.auth.userId;
+}
+
 inline std::optional<nlohmann::json> parseJsonObject(const Http::Request& req) {
     try {
         nlohmann::json body = nlohmann::json::parse(req.body);

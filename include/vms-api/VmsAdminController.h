@@ -5,7 +5,6 @@
 #include "HttpServer.h"
 
 #include "VmsAdminService.h"
-#include "VmsUserService.h"
 
 #include "nlohmann/json.hpp"
 
@@ -15,10 +14,9 @@ class VmsAdminController {
 private:
     HttpServer& httpServer;
     VmsAdminService& adminService;
-    VmsUserService& userService;
 
 public:
-    VmsAdminController(HttpServer& server, VmsAdminService& adminService, VmsUserService& userService);
+    VmsAdminController(HttpServer& server, VmsAdminService& adminService);
     ~VmsAdminController();
 
 private:

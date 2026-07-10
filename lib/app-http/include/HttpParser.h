@@ -39,6 +39,12 @@ struct Headers {
     bool has(const std::string& key) const { return get(key) != nullptr; }
 };
 
+struct AuthContext {
+    bool authenticated = false;
+    bool admin = false;
+    std::int64_t userId = 0;
+};
+
 // HTTP Request
 struct Request {
     std::string method;
@@ -48,6 +54,7 @@ struct Request {
     std::string body;
     std::unordered_map<std::string, std::string> path_params;
     std::unordered_map<std::string, std::string> query_params;
+    AuthContext auth;
 
     const std::string* getPathParam(const std::string& key) const {
         auto it = path_params.find(key);

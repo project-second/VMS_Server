@@ -12,6 +12,8 @@
 #include "VmsDeviceController.h"
 #include "VmsDeviceRepository.h"
 #include "VmsDeviceService.h"
+#include "VmsApiResponses.h"
+#include "VmsRequestHelpers.h"
 #include "VmsUserController.h"
 #include "VmsUserRepository.h"
 #include "VmsUserService.h"
@@ -92,6 +94,62 @@ bool parseCreateAdminArgs(
     loginId = trim(loginId);
     name = trim(name);
     return !loginId.empty() && !name.empty();
+}
+
+std::string requestPath(const Http::Request& req) {
+    return split_once(req.target, '?')[0];
+}
+
+bool requestMatches(const Http::Request& req, const std::string& method, const std::string& path) {
+    return to_lower(req.method) == to_lower(method) && requestPath(req) == path;
+}
+
+bool isPublicHttpApi(const Http::Request& req) {
+    return requestMatches(req, "POST", "/users/login")
+        || requestMatches(req, "POST", "/users/signup")
+        || requestMatches(req, "POST", "/users/token/refresh");
+}
+
+bool isAdminHttpApi(const Http::Request& req) {
+    return requestPath(req).rfind("/admin/", 0) == 0;
+}
+
+std::optional<Http::Response> authenticateHttpApi(
+    Http::Request& req,
+    VmsUserService& userService,
+    VmsAdminService& adminService) {
+    if (isPublicHttpApi(req)) {
+        return std::nullopt;
+    }
+
+    const auto accessToken = VmsRequest::extractBearerToken(req);
+    if (!accessToken) {
+        return VmsApiResponse::invalidTokenResponse();
+    }
+
+    const auto validation = userService.validateAccessToken(*accessToken);
+    if (validation.status != VmsUserService::TokenStatus::Valid) {
+        return VmsApiResponse::invalidTokenResponse();
+    }
+
+    req.auth.authenticated = true;
+    req.auth.userId = validation.userId;
+
+    if (isAdminHttpApi(req)) {
+        const auto adminStatus = adminService.checkAdmin(validation.userId);
+        if (adminStatus == VmsAdminService::AdminCheckStatus::Forbidden) {
+            return VmsApiResponse::forbiddenResponse();
+        }
+        if (adminStatus == VmsAdminService::AdminCheckStatus::NotFound) {
+            return VmsApiResponse::invalidTokenResponse();
+        }
+        if (adminStatus != VmsAdminService::AdminCheckStatus::Authorized) {
+            return VmsApiResponse::internalServerErrorResponse();
+        }
+        req.auth.admin = true;
+    }
+
+    return std::nullopt;
 }
 
 bool readPasswordLine(const char* prompt, std::string& password) {
@@ -220,8 +278,13 @@ int main(int argc, char const* argv[]) {
     VmsAdminService adminService(adminRepository);
     VmsDeviceRepository deviceRepository;
     VmsDeviceService deviceService(deviceRepository);
+
+    server.setMiddleware([&userService, &adminService](Http::Request& req) -> std::optional<Http::Response> {
+        return authenticateHttpApi(req, userService, adminService);
+    });
+
     VmsUserController userController(server, userService);
-    VmsAdminController adminController(server, adminService, userService);
+    VmsAdminController adminController(server, adminService);
     VmsDeviceController deviceController(server, deviceService);
 
     ThreadPool onvifThreadPool;

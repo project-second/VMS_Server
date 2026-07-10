@@ -6,33 +6,12 @@
 
 namespace {
 
-Http::Response requireAdmin(
-    const Http::Request& req,
-    VmsUserService& userService,
-    VmsAdminService& adminService,
-    std::int64_t& adminUserId) {
-    const auto accessToken = VmsRequest::extractBearerToken(req);
-    if (!accessToken) {
+Http::Response requireAdmin(const Http::Request& req, std::int64_t& adminUserId) {
+    if (!req.auth.authenticated || !req.auth.admin || req.auth.userId <= 0) {
         return VmsApiResponse::invalidTokenResponse();
     }
 
-    const auto validation = userService.validateAccessToken(*accessToken);
-    if (validation.status != VmsUserService::TokenStatus::Valid) {
-        return VmsApiResponse::invalidTokenResponse();
-    }
-
-    const auto adminStatus = adminService.checkAdmin(validation.userId);
-    if (adminStatus == VmsAdminService::AdminCheckStatus::NotFound) {
-        return VmsApiResponse::invalidTokenResponse();
-    }
-    if (adminStatus == VmsAdminService::AdminCheckStatus::Forbidden) {
-        return VmsApiResponse::forbiddenResponse();
-    }
-    if (adminStatus != VmsAdminService::AdminCheckStatus::Authorized) {
-        return VmsApiResponse::internalServerErrorResponse();
-    }
-
-    adminUserId = validation.userId;
+    adminUserId = req.auth.userId;
     return Http::Response{};
 }
 
@@ -57,9 +36,8 @@ Http::Response mutationResponse(VmsAdminService::MutationStatus status) {
 
 } // namespace
 
-VmsAdminController::VmsAdminController(
-    HttpServer& server, VmsAdminService& adminService, VmsUserService& userService)
-    : httpServer(server), adminService(adminService), userService(userService) {
+VmsAdminController::VmsAdminController(HttpServer& server, VmsAdminService& adminService)
+    : httpServer(server), adminService(adminService) {
     handleGetUserApprovals();
     handleApproveUser();
     handleRejectUser();
@@ -74,7 +52,7 @@ VmsAdminController::~VmsAdminController() {}
 void VmsAdminController::handleGetUserApprovals() {
 httpServer.addRoute(HttpMethod::GET, "/admin/users/approvals", [this](const Http::Request& req) -> Http::Response {
     std::int64_t adminUserId = 0;
-    Http::Response auth = requireAdmin(req, userService, adminService, adminUserId);
+    Http::Response auth = requireAdmin(req, adminUserId);
     if (auth.status_code != 0) return auth;
 
     int page = 1;
@@ -120,7 +98,7 @@ httpServer.addRoute(HttpMethod::GET, "/admin/users/approvals", [this](const Http
 void VmsAdminController::handleApproveUser() {
 httpServer.addRoute(HttpMethod::POST, "/admin/users/approvals/{approvalId}/approve", [this](const Http::Request& req) -> Http::Response {
     std::int64_t adminUserId = 0;
-    Http::Response auth = requireAdmin(req, userService, adminService, adminUserId);
+    Http::Response auth = requireAdmin(req, adminUserId);
     if (auth.status_code != 0) return auth;
 
     std::int64_t approvalId = 0;
@@ -152,7 +130,7 @@ httpServer.addRoute(HttpMethod::POST, "/admin/users/approvals/{approvalId}/appro
 void VmsAdminController::handleRejectUser() {
 httpServer.addRoute(HttpMethod::POST, "/admin/users/approvals/{approvalId}/reject", [this](const Http::Request& req) -> Http::Response {
     std::int64_t adminUserId = 0;
-    Http::Response auth = requireAdmin(req, userService, adminService, adminUserId);
+    Http::Response auth = requireAdmin(req, adminUserId);
     if (auth.status_code != 0) return auth;
 
     std::int64_t approvalId = 0;
@@ -181,7 +159,7 @@ httpServer.addRoute(HttpMethod::POST, "/admin/users/approvals/{approvalId}/rejec
 void VmsAdminController::handleGetUsersRole() {
 httpServer.addRoute(HttpMethod::GET, "/admin/users/{userId}/roles", [this](const Http::Request& req) -> Http::Response {
     std::int64_t adminUserId = 0;
-    Http::Response auth = requireAdmin(req, userService, adminService, adminUserId);
+    Http::Response auth = requireAdmin(req, adminUserId);
     if (auth.status_code != 0) return auth;
 
     std::int64_t userId = 0;
@@ -216,7 +194,7 @@ httpServer.addRoute(HttpMethod::GET, "/admin/users/{userId}/roles", [this](const
 void VmsAdminController::handleAddUserRole() {
 httpServer.addRoute(HttpMethod::POST, "/admin/users/{userId}/roles", [this](const Http::Request& req) -> Http::Response {
     std::int64_t adminUserId = 0;
-    Http::Response auth = requireAdmin(req, userService, adminService, adminUserId);
+    Http::Response auth = requireAdmin(req, adminUserId);
     if (auth.status_code != 0) return auth;
 
     std::int64_t userId = 0;
@@ -241,7 +219,7 @@ httpServer.addRoute(HttpMethod::POST, "/admin/users/{userId}/roles", [this](cons
 void VmsAdminController::handleDeleteUserRole() {
 httpServer.addRoute(HttpMethod::DELETE, "/admin/users/{userId}/roles/{roleCode}", [this](const Http::Request& req) -> Http::Response {
     std::int64_t adminUserId = 0;
-    Http::Response auth = requireAdmin(req, userService, adminService, adminUserId);
+    Http::Response auth = requireAdmin(req, adminUserId);
     if (auth.status_code != 0) return auth;
 
     std::int64_t userId = 0;
@@ -261,7 +239,7 @@ httpServer.addRoute(HttpMethod::DELETE, "/admin/users/{userId}/roles/{roleCode}"
 void VmsAdminController::handleUserDisactivation() {
 httpServer.addRoute(HttpMethod::PATCH, "/admin/users/{userId}/status", [this](const Http::Request& req) -> Http::Response {
     std::int64_t adminUserId = 0;
-    Http::Response auth = requireAdmin(req, userService, adminService, adminUserId);
+    Http::Response auth = requireAdmin(req, adminUserId);
     if (auth.status_code != 0) return auth;
 
     std::int64_t userId = 0;

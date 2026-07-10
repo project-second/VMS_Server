@@ -20,6 +20,7 @@ public:
     using Handler = std::function<Http::Response(const Http::Request&)>;
     using WebSocketHandler = std::function<void(WebSocketConnection&, const Http::Request&)>;
     using WebSocketHandshakeHandler = std::function<std::optional<Http::Response>(const Http::Request&)>;
+    using Middleware = std::function<std::optional<Http::Response>(Http::Request&)>;
 
     explicit HttpServer(std::string bind_ip, int port,
         std::size_t worker_count = std::thread::hardware_concurrency());
@@ -27,6 +28,8 @@ public:
 
     HttpServer(const HttpServer&) = delete;
     HttpServer& operator=(const HttpServer&) = delete;
+
+    void setMiddleware(Middleware middleware);
 
     bool addRoute(HttpMethod method, std::string path, Handler handler);
     bool removeRoute(HttpMethod method, std::string path);
@@ -67,6 +70,7 @@ private:
     std::unordered_map<std::string, Handler> routes_;
     std::unordered_map<std::string, WebSocketHandler> ws_routes_;
     std::unordered_map<std::string, WebSocketHandshakeHandler> ws_handshake_routes_;
+    Middleware middleware_;
 
     std::unordered_map<int, ClientState> clients_;
 

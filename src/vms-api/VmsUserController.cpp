@@ -180,17 +180,12 @@ httpServer.addRoute(HttpMethod::POST, "/users/signup", [this](const Http::Reques
 
 void VmsUserController::handleGetUserInfo() {
 httpServer.addRoute(HttpMethod::GET, "/users/me", [this](const Http::Request& req) -> Http::Response {
-    const auto accessToken = VmsRequest::extractBearerToken(req);
-    if (!accessToken) {
+    const auto userId = VmsRequest::authenticatedUserId(req);
+    if (!userId) {
         return VmsApiResponse::invalidTokenResponse();
     }
 
-    const auto validation = userService.validateAccessToken(*accessToken);
-    if (validation.status != VmsUserService::TokenStatus::Valid) {
-        return VmsApiResponse::invalidTokenResponse();
-    }
-
-    const auto result = userService.getUserInfo(validation.userId);
+    const auto result = userService.getUserInfo(*userId);
     if (result.status == VmsUserService::UserInfoStatus::NotFound) {
         return VmsApiResponse::notFoundResponse();
     }
@@ -211,13 +206,8 @@ httpServer.addRoute(HttpMethod::GET, "/users/me", [this](const Http::Request& re
 
 void VmsUserController::handleUpdateUserInfo() {
 httpServer.addRoute(HttpMethod::PATCH, "/users/me", [this](const Http::Request& req) -> Http::Response {
-    const auto accessToken = VmsRequest::extractBearerToken(req);
-    if (!accessToken) {
-        return VmsApiResponse::invalidTokenResponse();
-    }
-
-    const auto validation = userService.validateAccessToken(*accessToken);
-    if (validation.status != VmsUserService::TokenStatus::Valid) {
+    const auto userId = VmsRequest::authenticatedUserId(req);
+    if (!userId) {
         return VmsApiResponse::invalidTokenResponse();
     }
 
@@ -252,7 +242,7 @@ httpServer.addRoute(HttpMethod::PATCH, "/users/me", [this](const Http::Request& 
         return VmsApiResponse::invalidArgumentResponse();
     }
 
-    const auto result = userService.updateUserInfo(validation.userId, currentPassword, name, newPassword);
+    const auto result = userService.updateUserInfo(*userId, currentPassword, name, newPassword);
     if (result.status == VmsUserService::UpdateStatus::InvalidPassword) {
         return invalidPasswordResponse();
     }
@@ -274,13 +264,8 @@ httpServer.addRoute(HttpMethod::PATCH, "/users/me", [this](const Http::Request& 
 
 void VmsUserController::handleDeleteUser() {
 httpServer.addRoute(HttpMethod::DELETE, "/users/me", [this](const Http::Request& req) -> Http::Response {
-    const auto accessToken = VmsRequest::extractBearerToken(req);
-    if (!accessToken) {
-        return VmsApiResponse::invalidTokenResponse(true, false);
-    }
-
-    const auto validation = userService.validateAccessToken(*accessToken);
-    if (validation.status != VmsUserService::TokenStatus::Valid) {
+    const auto userId = VmsRequest::authenticatedUserId(req);
+    if (!userId) {
         return VmsApiResponse::invalidTokenResponse(true, false);
     }
 
@@ -292,7 +277,7 @@ httpServer.addRoute(HttpMethod::DELETE, "/users/me", [this](const Http::Request&
         return VmsApiResponse::invalidArgumentResponse();
     }
 
-    const auto status = userService.deleteUser(validation.userId, (*requestBody)["currentPassword"].get<std::string>());
+    const auto status = userService.deleteUser(*userId, (*requestBody)["currentPassword"].get<std::string>());
     if (status == VmsUserService::DeleteStatus::InvalidPassword) {
         return invalidPasswordResponse();
     }
