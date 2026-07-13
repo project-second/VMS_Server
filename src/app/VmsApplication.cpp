@@ -5,6 +5,7 @@
 #include "DbRuntime.hpp"
 #include "HttpServer.h"
 #include "OnvifDeviceProvisioningService.h"
+#include "RtspRelayServer.h"
 #include "OnvifSoapContext.h"
 #include "ThreadPool.hpp"
 #include "VmsAdminController.h"
@@ -81,6 +82,11 @@ int VmsApplication::run(int argc, char const* argv[]) {
     gst_init(nullptr, nullptr);
 
     CameraManager cameraManager;
+    RtspRelayServer relayServer(
+        std::to_string(config.mediaRtspRelayPort),
+        config.mediaRtspRelayBindAddress,
+        config.mediaRtspRelayAdvertisedHost,
+        config.mediaRtspRelayEnabled);
 
     std::signal(SIGINT, handle_shutdown_signal);
     std::signal(SIGTERM, handle_shutdown_signal);
@@ -106,13 +112,19 @@ int VmsApplication::run(int argc, char const* argv[]) {
     OnvifDeviceProvisioningService onvifProvisioning(
         onvifThreadPool,
         cameraManager,
+        relayServer,
         config.onvifDiscoveryIntervalMs,
         MediaRecordingOptions{
             .recordRootDir = config.mediaRecordingRootDir,
             .splitSeconds = config.mediaRecordingSplitSeconds,
         });
 
+    if (!relayServer.start()) {
+        return 1;
+    }
+
     if (!server.start()) {
+        relayServer.stop();
         return 1;
     }
 
@@ -127,6 +139,8 @@ int VmsApplication::run(int argc, char const* argv[]) {
     onvifProvisioning.stop();
     std::cout << "Stopping CameraManager..." << std::endl;
     cameraManager.stop_all();
+    std::cout << "Stopping RtspRelayServer..." << std::endl;
+    relayServer.stop();
 
     return 0;
 }

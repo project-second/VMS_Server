@@ -11,6 +11,7 @@
 #include "OnvifProvisioningTypes.h"
 #include "CameraManager.h"
 #include "MediaService.h"
+#include "RtspRelayServer.h"
 
 #include <atomic>
 #include <memory>
@@ -44,6 +45,7 @@ public:
     OnvifDeviceProvisioningService(
         ThreadPool& tp,
         CameraManager& cameraManager,
+        RtspRelayServer& relayServer,
         int discoveryIntervalMs,
         MediaRecordingOptions recordingOptions = {});
     ~OnvifDeviceProvisioningService();

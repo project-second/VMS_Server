@@ -14,15 +14,6 @@ constexpr std::int64_t kOnlineStateOnline = 1;
 constexpr std::int64_t kVideoStateUnknown = 0;
 constexpr std::int64_t kDefaultChannelNo = 1;
 
-std::string firstStreamUri(const ProvisioningResult& result) {
-    for (const OnvifProvisionedProfile& profile : result.profiles) {
-        if (profile.streamUri && !profile.streamUri->uri.empty()) {
-            return profile.streamUri->uri;
-        }
-    }
-    return {};
-}
-
 std::string deviceNameOf(const ProvisioningResult& result) {
     if (!result.deviceInformation.model.empty()) {
         return result.deviceInformation.model;
@@ -51,28 +42,21 @@ OnvifProvisioningRepository::OnvifProvisioningRepository() = default;
 
 OnvifProvisioningRepository::~OnvifProvisioningRepository() = default;
 
-bool OnvifProvisioningRepository::upsert(const std::vector<ProvisioningResult>& results) {
-    bool ok = true;
-
-    for (const ProvisioningResult& result : results) {
-        std::optional<std::int64_t> deviceId = upsertDevice(result);
-        if (!deviceId) {
-            ok = false;
-            continue;
-        }
-
-        std::optional<std::int64_t> channelId = upsertChannel(*deviceId, result);
-        if (!channelId) {
-            ok = false;
-            continue;
-        }
-
-        if (!upsertProfiles(*channelId, result)) {
-            ok = false;
-        }
+std::optional<std::int64_t> OnvifProvisioningRepository::ensureChannel(const ProvisioningResult& result) {
+    std::optional<std::int64_t> deviceId = upsertDevice(result);
+    if (!deviceId) {
+        return std::nullopt;
     }
+    return upsertChannel(*deviceId, result);
+}
 
-    return ok;
+bool OnvifProvisioningRepository::updateChannelServiceRtspUrl(
+    std::int64_t channelId,
+    const std::string& serviceRtspUrl) {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("service_rtsp_url", serviceRtspUrl);
+    return AppDb::update("onvif.updateChannelServiceRtspUrl", params);
 }
 
 std::optional<std::int64_t> OnvifProvisioningRepository::upsertDevice(const ProvisioningResult& result) {
@@ -142,7 +126,7 @@ std::optional<std::int64_t> OnvifProvisioningRepository::upsertChannel(
     params.emplace("channel_no", kDefaultChannelNo);
     params.emplace("name", deviceNameOf(result));
     params.emplace("use_profile", std::int64_t(1));
-    params.emplace("service_rtsp_url", firstStreamUri(result));
+    params.emplace("service_rtsp_url", std::string{});
 
     std::optional<std::int64_t> channelId = firstId(rows, "channel_id");
     if (channelId) {

@@ -2,6 +2,7 @@
 #define __MEDIASERVICE_H__
 
 #include "CameraManager.h"
+#include "RtspRelayServer.h"
 #include "OnvifProvisioningRepository.h"
 
 #include <mutex>
@@ -17,13 +18,18 @@ struct MediaRecordingOptions {
 class MediaService {
 private:
     CameraManager& cameraManager;
+    RtspRelayServer& relayServer;
     OnvifProvisioningRepository& repository;
     std::mutex mutex_;
     std::unordered_set<std::string> registeredCameraIds_;
     MediaRecordingOptions recordingOptions_;
 
 public:
-    MediaService(CameraManager& cm, OnvifProvisioningRepository& rp, MediaRecordingOptions recordingOptions = {});
+    MediaService(
+        CameraManager& cm,
+        RtspRelayServer& relay,
+        OnvifProvisioningRepository& rp,
+        MediaRecordingOptions recordingOptions = {});
     ~MediaService();
 
     void addCamera(const std::vector<ProvisioningResult>& results);

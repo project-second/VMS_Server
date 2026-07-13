@@ -116,8 +116,14 @@ mapper:
         SET
           name = #{name},
           use_profile = #{use_profile},
-          service_rtsp_url = #{service_rtsp_url},
           enabled = true
+        WHERE channel_id = #{channel_id}
+
+    - id: updateChannelServiceRtspUrl
+      sequence: update
+      query: >
+        UPDATE channels
+        SET service_rtsp_url = #{service_rtsp_url}
         WHERE channel_id = #{channel_id}
 
     - id: getProfileByChannelAndToken

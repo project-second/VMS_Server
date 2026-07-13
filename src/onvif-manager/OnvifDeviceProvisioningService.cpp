@@ -3,9 +3,10 @@
 OnvifDeviceProvisioningService::OnvifDeviceProvisioningService(
     ThreadPool& tp,
     CameraManager& cameraManager,
+    RtspRelayServer& relayServer,
     int discoveryIntervalMs,
     MediaRecordingOptions recordingOptions)
-    : threadPool{tp}, mediaService{cameraManager, repository, std::move(recordingOptions)} {
+    : threadPool{tp}, mediaService{cameraManager, relayServer, repository, std::move(recordingOptions)} {
     discoveryService.setDiscoveryInterval(std::chrono::milliseconds(discoveryIntervalMs));
 }
 

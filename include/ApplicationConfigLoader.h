@@ -17,6 +17,10 @@ struct AppRuntimeConfig {
     std::string onvifSoapLogDir = "/tmp";
     std::string mediaRecordingRootDir = "recordings/onvif";
     int mediaRecordingSplitSeconds = 5;
+    bool mediaRtspRelayEnabled = true;
+    std::string mediaRtspRelayBindAddress = "0.0.0.0";
+    int mediaRtspRelayPort = 8555;
+    std::string mediaRtspRelayAdvertisedHost = "127.0.0.1";
     int mediaMtxPlaybackSyncIntervalMs = 30000;
 };
 

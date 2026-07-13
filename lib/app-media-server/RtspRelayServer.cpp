@@ -84,8 +84,15 @@ void on_media_configure(
 
 } // namespace
 
-RtspRelayServer::RtspRelayServer(std::string service)
-    : service_(std::move(service)) {}
+RtspRelayServer::RtspRelayServer(
+    std::string service,
+    std::string bind_address,
+    std::string advertised_host,
+    bool enabled)
+    : service_(std::move(service)),
+      bind_address_(std::move(bind_address)),
+      advertised_host_(std::move(advertised_host)),
+      enabled_(enabled) {}
 
 RtspRelayServer::~RtspRelayServer() {
     stop();
@@ -94,10 +101,7 @@ RtspRelayServer::~RtspRelayServer() {
 bool RtspRelayServer::add_h264_camera(const CameraConfig& config) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (running_) {
-        std::cerr << "RtspRelayServer: cannot add camera while server is running. "
-                  << "Stop server first. camera_id=" << config.camera_id
-                  << std::endl;
+    if (!enabled_) {
         return false;
     }
 
@@ -117,8 +121,13 @@ bool RtspRelayServer::add_h264_camera(const CameraConfig& config) {
         return false;
     }
 
+    const auto mounted = mounted_sources_.find(config.camera_id);
+    if (mounted != mounted_sources_.end() && mounted->second == config.rtsp_uri) {
+        return true;
+    }
+
     const std::string mount_path = make_mount_path(config.camera_id);
-    const std::string output_url = make_local_url(config.camera_id);
+    const std::string output_url = make_public_url(config.camera_id);
     const std::string launch = make_h264_relay_launch(config.rtsp_uri);
 
     GstRTSPMountPoints* mounts = gst_rtsp_server_get_mount_points(server_);
@@ -161,7 +170,7 @@ bool RtspRelayServer::add_h264_camera(const CameraConfig& config) {
     gst_rtsp_mount_points_add_factory(mounts, mount_path.c_str(), factory);
     g_object_unref(mounts);
 
-    mounted_paths_.push_back(mount_path);
+    mounted_sources_[config.camera_id] = config.rtsp_uri;
 
     std::cout << "RtspRelayServer: added H264 relay" << std::endl;
     std::cout << "  camera_id: " << config.camera_id << std::endl;
@@ -175,6 +184,11 @@ bool RtspRelayServer::add_h264_camera(const CameraConfig& config) {
 
 bool RtspRelayServer::start() {
     std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!enabled_) {
+        std::cout << "RtspRelayServer disabled" << std::endl;
+        return true;
+    }
 
     if (running_) {
         return true;
@@ -211,8 +225,8 @@ bool RtspRelayServer::start() {
     });
 
     std::cout << "RtspRelayServer started" << std::endl;
-    for (const auto& path : mounted_paths_) {
-        std::cout << "  rtsp://127.0.0.1:" << service_ << path << std::endl;
+    for (const auto& mounted : mounted_sources_) {
+        std::cout << "  " << make_public_url(mounted.first) << std::endl;
     }
 
     return true;
@@ -252,7 +266,7 @@ void RtspRelayServer::stop() {
         server_ = nullptr;
     }
 
-    mounted_paths_.clear();
+    mounted_sources_.clear();
     running_ = false;
 
     std::cout << "RtspRelayServer stopped" << std::endl;
@@ -262,8 +276,12 @@ std::string RtspRelayServer::make_mount_path(const std::string& camera_id) const
     return "/live/" + camera_id;
 }
 
-std::string RtspRelayServer::make_local_url(const std::string& camera_id) const {
-    return "rtsp://127.0.0.1:" + service_ + make_mount_path(camera_id);
+std::string RtspRelayServer::make_public_url(const std::string& camera_id) const {
+    return "rtsp://" + advertised_host_ + ":" + service_ + make_mount_path(camera_id);
+}
+
+bool RtspRelayServer::is_enabled() const {
+    return enabled_;
 }
 
 bool RtspRelayServer::ensure_server_created_locked() {
@@ -277,7 +295,11 @@ bool RtspRelayServer::ensure_server_created_locked() {
         return false;
     }
 
-    g_object_set(server_, "service", service_.c_str(), nullptr);
+    g_object_set(
+        server_,
+        "service", service_.c_str(),
+        "address", bind_address_.c_str(),
+        nullptr);
     return true;
 }
 

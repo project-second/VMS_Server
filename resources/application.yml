@@ -40,6 +40,14 @@ app:
       rootDir: "recordings/onvif"
       splitSeconds: 5
 
+    rtspRelay:
+      enabled: true
+      # RTSP 서버가 수신할 주소와 포트입니다.
+      bindAddress: "0.0.0.0"
+      port: 8555
+      # DB에 저장될 RTSP URL의 host입니다. 외부 클라이언트가 접근 가능한 VMS IP/DNS로 변경하세요.
+      advertisedHost: "127.0.0.1"
+
   #   pullMessages:
   #     maxPollCount: 0
 

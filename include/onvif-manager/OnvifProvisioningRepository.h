@@ -19,9 +19,14 @@ public:
     OnvifProvisioningRepository();
     ~OnvifProvisioningRepository();
 
-    // 한 provisioning cycle에서 수집한 장비 결과를 저장한다.
-    // 일부 장비 저장에 실패해도 가능한 나머지는 계속 처리하고, 하나라도 실패하면 false를 반환한다.
-    bool upsert(const std::vector<ProvisioningResult>& results);
+    // devices/device_health/channel을 먼저 upsert하고 relay mount에 사용할 channel_id를 반환한다.
+    std::optional<std::int64_t> ensureChannel(const ProvisioningResult& result);
+
+    // channel_id가 포함된 relay URL을 channels.service_rtsp_url에 반영한다.
+    bool updateChannelServiceRtspUrl(std::int64_t channelId, const std::string& serviceRtspUrl);
+
+    // channel 아래의 ONVIF media profiles를 profiles 테이블에 반영한다.
+    bool upsertProfiles(std::int64_t channelId, const ProvisioningResult& result);
 
 private:
     // devices와 device_health를 갱신하고 devices.device_id를 반환한다.
@@ -30,8 +35,6 @@ private:
     // 현재는 ONVIF 장비 1대를 기본 channel_no=1인 CCTV 채널 하나로 매핑한다.
     std::optional<std::int64_t> upsertChannel(std::int64_t deviceId, const ProvisioningResult& result);
 
-    // channel 아래의 ONVIF media profiles를 profiles 테이블에 반영한다.
-    bool upsertProfiles(std::int64_t channelId, const ProvisioningResult& result);
 };
 
 #endif // __ONVIFPROVISIONINGREPOSITORY_H__
