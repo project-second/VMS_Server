@@ -8,6 +8,7 @@ find_package(Threads REQUIRED)
 pkg_check_modules(GSTREAMER REQUIRED IMPORTED_TARGET
     gstreamer-1.0
     gstreamer-app-1.0
+    gstreamer-rtsp-server-1.0
 )
 
 file(GLOB SOURCES 

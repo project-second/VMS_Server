@@ -1,4 +1,5 @@
-#pragma once
+#ifndef __CAMERAMANAGER_H__
+#define __CAMERAMANAGER_H__
 
 #include "CameraWorker.h"
 #include "RecordingSegmentStore.h"
@@ -58,3 +59,5 @@ private:
 
     RecordingSegmentStore segment_store_;
 };
+
+#endif // __CAMERAMANAGER_H__
