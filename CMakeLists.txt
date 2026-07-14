@@ -46,9 +46,39 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
     INSTALL_RPATH "$ORIGIN/../lib"
 )
 
+# DT_RUNPATH는 직접 dependency에만 적용되어 libgstrtspserver -> libgstrtsp 같은
+# 전이 dependency가 bundled lib directory를 찾지 못한다. DT_RPATH를 사용해
+# 패키지 내부 lib 경로가 전체 dependency chain에 적용되게 한다.
+if(UNIX AND NOT APPLE)
+    target_link_options(${PROJECT_NAME} PRIVATE "LINKER:--disable-new-dtags")
+endif()
+
 install(TARGETS ${PROJECT_NAME}
     RUNTIME DESTINATION bin
 )
+
+# RtspRelayServer는 gstreamer-rtsp-server의 public API를 직접 사용한다.
+# GET_RUNTIME_DEPENDENCIES가 정적 library의 새 참조를 놓치거나 이전 build cache를
+# 재사용하더라도 배포본에서 RTSP server/core runtime이 빠지지 않도록 명시한다.
+find_library(VMS_GSTREAMER_RTSP_SERVER_LIBRARY
+    NAMES gstrtspserver-1.0
+    REQUIRED
+)
+find_library(VMS_GSTREAMER_RTSP_LIBRARY
+    NAMES gstrtsp-1.0
+    REQUIRED
+)
+
+install(CODE "
+    file(INSTALL
+        DESTINATION \"\${CMAKE_INSTALL_PREFIX}/lib\"
+        TYPE SHARED_LIBRARY
+        FOLLOW_SYMLINK_CHAIN
+        FILES
+            \"${VMS_GSTREAMER_RTSP_SERVER_LIBRARY}\"
+            \"${VMS_GSTREAMER_RTSP_LIBRARY}\"
+    )
+")
 
 install(CODE [[
     file(GET_RUNTIME_DEPENDENCIES
@@ -91,6 +121,9 @@ set(VMS_GSTREAMER_PLUGIN_SCANNER /usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreame
 set(VMS_GSTREAMER_PLUGIN_FILES
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstrtsp.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstrtp.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstrtpmanager.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstudp.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgsttcp.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstvideoparsersbad.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstmultifile.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstlibav.so
@@ -118,6 +151,9 @@ install(CODE [[
     set(gst_plugin_files
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstrtsp.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstrtp.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstrtpmanager.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstudp.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgsttcp.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstvideoparsersbad.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstmultifile.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstlibav.so"
