@@ -1,5 +1,4 @@
-#ifndef __RECORDINGSEGMENTSTORE_H__
-#define __RECORDINGSEGMENTSTORE_H__
+#pragma once
 
 #include <chrono>
 #include <mutex>
@@ -63,5 +62,3 @@ private:
         const std::chrono::system_clock::time_point& time
     );
 };
-
-#endif // __RECORDINGSEGMENTSTORE_H__

@@ -160,6 +160,14 @@ void CameraManager::print_segments() const {
     segment_store_.print_all();
 }
 
+const RecordingSegmentStore& CameraManager::segment_store() const {
+    return segment_store_;
+}
+
+RecordingSegmentStore& CameraManager::segment_store() {
+    return segment_store_;
+}
+
 void CameraManager::print_segments_by_time_range(
     const std::string& camera_id,
     const std::chrono::system_clock::time_point& from,

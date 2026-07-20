@@ -1,5 +1,4 @@
-#ifndef __CAMERAMANAGER_H__
-#define __CAMERAMANAGER_H__
+#pragma once
 
 #include "CameraWorker.h"
 #include "RecordingSegmentStore.h"
@@ -39,6 +38,9 @@ public:
 
     void print_segments() const;
 
+    const RecordingSegmentStore& segment_store() const;
+    RecordingSegmentStore& segment_store();
+
     void print_segments_by_time_range(
         const std::string& camera_id,
         const std::chrono::system_clock::time_point& from,
@@ -59,5 +61,3 @@ private:
 
     RecordingSegmentStore segment_store_;
 };
-
-#endif // __CAMERAMANAGER_H__
