@@ -119,6 +119,27 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_profiles_channel_token
     ON profiles (channel_id, onvif_profile_token)
     WHERE onvif_profile_token IS NOT NULL AND onvif_profile_token <> '';
 
+CREATE TABLE IF NOT EXISTS archive_segment (
+    seg_id bigserial PRIMARY KEY,
+    profile_id bigint NOT NULL REFERENCES profiles(profile_id),
+    file_path text NOT NULL,
+    start_ts timestamptz NOT NULL,
+    end_ts timestamptz,
+    file_size bigint,
+    codec varchar(32),
+    status varchar(16) NOT NULL DEFAULT 'recording',
+    has_gap boolean NOT NULL DEFAULT false
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_archive_segment_file_path
+    ON archive_segment (file_path);
+
+CREATE INDEX IF NOT EXISTS ix_archive_segment_profile_start
+    ON archive_segment (profile_id, start_ts);
+
+CREATE INDEX IF NOT EXISTS ix_archive_segment_status
+    ON archive_segment (status);
+
 CREATE TABLE IF NOT EXISTS ptz_capabilities (
     channel_id bigint PRIMARY KEY REFERENCES channels(channel_id) ON DELETE CASCADE,
     supports_pan boolean,
