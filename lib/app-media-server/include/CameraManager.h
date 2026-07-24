@@ -16,6 +16,7 @@
 // - profile token, PTZ token, GetStreamUri 과정은 ONVIF/DB/서비스 계층에서 관리한다.
 // - 이 모듈은 최종적으로 선택된 RTSP URI만 받아 녹화한다.
 struct CameraConfig {
+    std::int64_t profile_id = 0;
     std::string camera_id;
     std::string rtsp_uri;
     std::string record_pattern;

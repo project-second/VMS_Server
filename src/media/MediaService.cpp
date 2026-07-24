@@ -92,6 +92,11 @@ void MediaService::addCamera(const std::vector<ProvisioningResult>& results) {
             continue;
         }
 
+        if (!repository.upsertProfiles(*channelId, result)) {
+            LogSync::error("[Provisioning] failed to upsert profiles: channel_id=", *channelId);
+            continue;
+        }
+
         std::string channelRelayUrl;
 
         for (std::size_t index = 0; index < result.profiles.size(); ++index) {
@@ -105,6 +110,13 @@ void MediaService::addCamera(const std::vector<ProvisioningResult>& results) {
             }
 
             CameraConfig config;
+            const auto profileId = repository.findProfileId(*channelId, profile.profile.token);
+            if (!profileId) {
+                LogSync::error("[Media] profile_id not found: channel_id=",
+                    *channelId, ", token=", profile.profile.token);
+                continue;
+            }
+            config.profile_id = *profileId;
             config.camera_id = makeCameraId(result, profile, index, *channelId);
             config.rtsp_uri = profile.streamUri->uri;
             config.record_pattern = makeRecordPattern(recordingOptions_, config.camera_id);
@@ -148,8 +160,5 @@ void MediaService::addCamera(const std::vector<ProvisioningResult>& results) {
             LogSync::error("[Provisioning] failed to update channel relay URL: channel_id=", *channelId);
         }
 
-        if (!repository.upsertProfiles(*channelId, result)) {
-            LogSync::error("[Provisioning] failed to upsert profiles: channel_id=", *channelId);
-        }
     }
 }

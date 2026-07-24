@@ -4,17 +4,21 @@
 
 #include <glib.h>
 
+#include <chrono>
+#include <filesystem>
 #include <iostream>
 #include <utility>
 
 CameraWorker::CameraWorker(
+    std::int64_t profile_id,
     std::string camera_id,
     std::string rtsp_uri,
     std::string record_pattern,
     int split_seconds,
     RecordingSegmentStore* segment_store
 )
-    : camera_id_(std::move(camera_id)),
+    : profile_id_(profile_id),
+      camera_id_(std::move(camera_id)),
       rtsp_uri_(std::move(rtsp_uri)),
       record_pattern_(std::move(record_pattern)),
       split_seconds_(split_seconds),
@@ -58,6 +62,13 @@ void CameraWorker::run() {
     while (!stop_requested_) {
         retry_count++;
 
+        const auto attempt_id = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count();
+        const std::filesystem::path base_pattern(record_pattern_);
+        const std::filesystem::path attempt_pattern =
+            base_pattern.parent_path() /
+            (std::to_string(attempt_id) + "_" + std::to_string(retry_count) + "_%05d.mp4");
+
         std::cout << std::endl;
         std::cout << "[" << camera_id_ << "] "
                   << "===== Connect attempt "
@@ -67,9 +78,10 @@ void CameraWorker::run() {
 
         // 2. CameraPipeline 생성
         CameraPipeline camera(
+            profile_id_,
             camera_id_,
             rtsp_uri_,
-            record_pattern_,
+            attempt_pattern.string(),
             split_seconds_,
             segment_store_
         );

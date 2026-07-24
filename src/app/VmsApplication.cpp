@@ -16,6 +16,9 @@
 #include "VmsDeviceController.h"
 #include "VmsDeviceRepository.h"
 #include "VmsDeviceService.h"
+#include "VmsPlaybackController.h"
+#include "VmsPlaybackRepository.h"
+#include "VmsPlaybackService.h"
 #include "app/VmsRuntimePaths.h"
 #include "VmsUserController.h"
 #include "VmsUserRepository.h"
@@ -25,6 +28,7 @@
 
 #include <atomic>
 #include <csignal>
+#include <filesystem>
 #include <iostream>
 #include <string>
 
@@ -81,7 +85,22 @@ int VmsApplication::run(int argc, char const* argv[]) {
     configurePackagedGStreamerEnvironment(paths);
     gst_init(nullptr, nullptr);
 
+    VmsPlaybackRepository playbackRepository;
+    const std::filesystem::path playbackCacheRoot =
+        std::filesystem::path(config.mediaRecordingRootDir).parent_path() / "playback-cache";
+    VmsPlaybackService playbackService(playbackRepository, playbackCacheRoot);
+    if (!playbackService.interruptStaleRecordings()) {
+        std::cerr << "[Playback] failed to mark stale recording segments interrupted" << std::endl;
+    }
+
     CameraManager cameraManager;
+    cameraManager.segment_store().set_change_callback(
+        [&playbackService](const RecordingSegment& segment) {
+            if (!playbackService.persistRecordingSegment(segment)) {
+                std::cerr << "[Playback] failed to persist segment: "
+                          << segment.file_path << std::endl;
+            }
+        });
     RtspRelayServer relayServer(
         std::to_string(config.mediaRtspRelayPort),
         config.mediaRtspRelayBindAddress,
@@ -107,6 +126,7 @@ int VmsApplication::run(int argc, char const* argv[]) {
     VmsUserController userController(server, userService);
     VmsAdminController adminController(server, adminService);
     VmsDeviceController deviceController(server, deviceService);
+    VmsPlaybackController playbackController(server, playbackService);
 
     ThreadPool onvifThreadPool;
     OnvifDeviceProvisioningService onvifProvisioning(

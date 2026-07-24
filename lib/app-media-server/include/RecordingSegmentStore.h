@@ -1,12 +1,15 @@
 #pragma once
 
 #include <chrono>
+#include <cstdint>
+#include <functional>
 #include <mutex>
 #include <optional>
 #include <string>
 #include <vector>
 
 struct RecordingSegment {
+    std::int64_t profile_id = 0;
     std::string camera_id;
     std::string file_path;
 
@@ -17,12 +20,19 @@ struct RecordingSegment {
 };
 
 class RecordingSegmentStore {
+public:
+    using SegmentChangeCallback = std::function<void(const RecordingSegment&)>;
+
 private:
     mutable std::mutex mutex_;
     std::vector<RecordingSegment> segments_;
+    SegmentChangeCallback change_callback_;
     
 public:
+    void set_change_callback(SegmentChangeCallback callback);
+
     void on_segment_started(
+        std::int64_t profile_id,
         const std::string& camera_id,
         const std::string& file_path
     );

@@ -29,7 +29,7 @@ bool time_in_half_open_range(
 } // namespace
 
 PlaybackService::PlaybackService(const RecordingSegmentStore& segment_store)
-    : segment_store_(segment_store) {
+    : segment_store_(&segment_store) {
 }
 
 PlaybackResponse PlaybackService::create_session(
@@ -41,12 +41,25 @@ PlaybackResponse PlaybackService::create_session(
         return validation;
     }
 
-    // 2. 요청 시간 범위와 겹치는 녹화 segment 조회
-    auto segments = segment_store_.find_segments_by_time_range(
-        request.camera_id,
-        request.from,
-        request.to
-    );
+    if (segment_store_ == nullptr) {
+        PlaybackResponse response;
+        response.error_message = "recording segment store is not configured";
+        return response;
+    }
+
+    auto segments = segment_store_->find_segments_by_time_range(
+        request.camera_id, request.from, request.to);
+    return create_session(request, std::move(segments));
+}
+
+PlaybackResponse PlaybackService::create_session(
+    const PlaybackRequest& request,
+    std::vector<RecordingSegment> segments
+) const {
+    auto validation = validate_request(request);
+    if (!validation.ok) {
+        return validation;
+    }
 
     // 3. 시간 순서 정렬
     std::sort(

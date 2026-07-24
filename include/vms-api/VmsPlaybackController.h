@@ -1,29 +1,19 @@
-#ifndef __VMSPLAYBACKCONTROLLER_H__
-#define __VMSPLAYBACKCONTROLLER_H__
+#pragma once
 
-#include "LogSync.h"
 #include "HttpServer.h"
-
-#include "nlohmann/json.hpp"
-
-using json = nlohmann::json;
+#include "VmsPlaybackService.h"
 
 class VmsPlaybackController {
-private:
-    HttpServer& httpServer;
-
 public:
-    VmsPlaybackController(HttpServer& server);
-    ~VmsPlaybackController();
+    VmsPlaybackController(HttpServer& server, VmsPlaybackService& service);
 
+private:
     void handleGetSegmentList();
     void handleGetTimelineList();
     void handleStreamTimeRange();
-    void handleDownloadTimeRange();
     void handleGetSegment();
-    void handleSegmentStream();
-    void handleSegmentDownload();
-    void handleSegmentThumbnail();
-};
+    void handleHlsSegment();
 
-#endif // __VMSPLAYBACKCONTROLLER_H__
+    HttpServer& httpServer_;
+    VmsPlaybackService& service_;
+};

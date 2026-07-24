@@ -4,22 +4,35 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <utility>
+
+void RecordingSegmentStore::set_change_callback(SegmentChangeCallback callback) {
+    std::lock_guard<std::mutex> lock(mutex_);
+    change_callback_ = std::move(callback);
+}
 
 void RecordingSegmentStore::on_segment_started(
+    std::int64_t profile_id,
     const std::string& camera_id,
     const std::string& file_path
 ) {
     // 1. Segment 생성
     RecordingSegment segment;
+    segment.profile_id = profile_id;
     segment.camera_id = camera_id;
     segment.file_path = file_path;
     segment.started_at = std::chrono::system_clock::now();
     segment.status = "recording";
 
     // 2. 메모리 저장
+    SegmentChangeCallback callback;
     {
         std::lock_guard<std::mutex> lock(mutex_);
         segments_.push_back(segment);
+        callback = change_callback_;
+    }
+    if (callback) {
+        callback(segment);
     }
 
     // 3. 콘솔 출력
@@ -34,60 +47,69 @@ void RecordingSegmentStore::on_segment_finished(
     const std::string& camera_id,
     const std::string& file_path
 ) {
-    auto ended_at = std::chrono::system_clock::now();
+    const auto ended_at = std::chrono::system_clock::now();
+    std::optional<RecordingSegment> changed;
+    SegmentChangeCallback callback;
 
-    std::lock_guard<std::mutex> lock(mutex_);
-
-    // 1. 해당 Segment 찾기
-    for (auto& segment : segments_) {
-        if (segment.camera_id == camera_id &&
-            segment.file_path == file_path &&
-            segment.status == "recording") {
-            segment.ended_at = ended_at;
-            segment.status = "completed";
-
-            // 2. 콘솔 출력
-            std::cout << "[SEGMENT FINISHED] "
-                      << "camera_id=" << camera_id
-                      << ", file=" << file_path
-                      << ", started_at=" << time_to_string(segment.started_at)
-                      << ", ended_at=" << time_to_string(ended_at)
-                      << ", status=completed"
-                      << std::endl;
-
-            return;
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& segment : segments_) {
+            if (segment.camera_id == camera_id &&
+                segment.file_path == file_path &&
+                segment.status == "recording") {
+                segment.ended_at = ended_at;
+                segment.status = "completed";
+                changed = segment;
+                callback = change_callback_;
+                break;
+            }
         }
     }
 
-    // 3. 이미 completed였거나 찾지 못한 경우
-    std::cout << "[SEGMENT FINISHED] "
-              << "camera_id=" << camera_id
+    if (!changed) {
+        std::cout << "[SEGMENT FINISHED] camera_id=" << camera_id
+                  << ", file=" << file_path
+                  << ", warning=segment not found or already closed" << std::endl;
+        return;
+    }
+
+    std::cout << "[SEGMENT FINISHED] camera_id=" << camera_id
               << ", file=" << file_path
-              << ", warning=segment not found or already closed"
-              << std::endl;
+              << ", started_at=" << time_to_string(changed->started_at)
+              << ", ended_at=" << time_to_string(ended_at)
+              << ", status=completed" << std::endl;
+    if (callback) {
+        callback(*changed);
+    }
 }
 
 void RecordingSegmentStore::mark_open_segments_interrupted(
     const std::string& camera_id
 ) {
-    auto ended_at = std::chrono::system_clock::now();
+    const auto ended_at = std::chrono::system_clock::now();
+    std::vector<RecordingSegment> changed;
+    SegmentChangeCallback callback;
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& segment : segments_) {
+            if (segment.camera_id == camera_id && segment.status == "recording") {
+                segment.ended_at = ended_at;
+                segment.status = "interrupted";
+                changed.push_back(segment);
+            }
+        }
+        callback = change_callback_;
+    }
 
-    // 1. 아직 recording 상태인 segment를 interrupted로 마킹
-    for (auto& segment : segments_) {
-        if (segment.camera_id == camera_id &&
-            segment.status == "recording") {
-            segment.ended_at = ended_at;
-            segment.status = "interrupted";
-
-            std::cout << "[SEGMENT INTERRUPTED] "
-                      << "camera_id=" << camera_id
-                      << ", file=" << segment.file_path
-                      << ", started_at=" << time_to_string(segment.started_at)
-                      << ", ended_at=" << time_to_string(ended_at)
-                      << ", status=interrupted"
-                      << std::endl;
+    for (const auto& segment : changed) {
+        std::cout << "[SEGMENT INTERRUPTED] camera_id=" << camera_id
+                  << ", file=" << segment.file_path
+                  << ", started_at=" << time_to_string(segment.started_at)
+                  << ", ended_at=" << time_to_string(ended_at)
+                  << ", status=interrupted" << std::endl;
+        if (callback) {
+            callback(segment);
         }
     }
 }

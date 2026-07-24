@@ -1,275 +1,269 @@
 #include "VmsPlaybackController.h"
 
-VmsPlaybackController::VmsPlaybackController(HttpServer& server) : httpServer(server) {
+#include "StringHelpers.h"
+#include "nlohmann/json.hpp"
+
+#include <algorithm>
+#include <chrono>
+#include <cmath>
+#include <cstdint>
+#include <ctime>
+#include <iomanip>
+#include <optional>
+#include <regex>
+#include <sstream>
+
+using json = nlohmann::json;
+
+namespace {
+
+Http::Response jsonResponse(HttpCode code, const json& data) {
+    Http::Response response;
+    response.setStatus(code);
+    response.headers.set("Content-Type", "application/json");
+    response.body = json{{"ok", true}, {"data", data}, {"error", nullptr}}.dump();
+    return response;
+}
+
+Http::Response errorResponse(HttpCode code, const std::string& errorCode,
+                             const std::string& message) {
+    Http::Response response;
+    response.setStatus(code);
+    response.headers.set("Content-Type", "application/json");
+    response.body = json{{"ok", false}, {"data", nullptr},
+        {"error", {{"code", errorCode}, {"message", message}}}}.dump();
+    return response;
+}
+
+std::optional<std::int64_t> integer(const std::string* value) {
+    if (!value) return std::nullopt;
+    std::int64_t parsed = 0;
+    if (!parse_int64_strict(*value, parsed)) return std::nullopt;
+    return parsed;
+}
+
+std::optional<std::int64_t> parseIso8601(const std::string& value) {
+    static const std::regex pattern(
+        R"(^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.([0-9]{1,3}))?(Z|z|([+-])([0-9]{2}):([0-9]{2}))$)");
+    std::smatch match;
+    if (!std::regex_match(value, match, pattern)) return std::nullopt;
+    std::tm tm{};
+    tm.tm_year = std::stoi(match[1]) - 1900;
+    tm.tm_mon = std::stoi(match[2]) - 1;
+    tm.tm_mday = std::stoi(match[3]);
+    tm.tm_hour = std::stoi(match[4]);
+    tm.tm_min = std::stoi(match[5]);
+    tm.tm_sec = std::stoi(match[6]);
+    tm.tm_isdst = 0;
+    const std::tm requested = tm;
+    const auto seconds = timegm(&tm);
+    if (seconds == static_cast<std::time_t>(-1)) return std::nullopt;
+    std::tm normalized{};
+    gmtime_r(&seconds, &normalized);
+    if (normalized.tm_year != requested.tm_year || normalized.tm_mon != requested.tm_mon ||
+        normalized.tm_mday != requested.tm_mday || normalized.tm_hour != requested.tm_hour ||
+        normalized.tm_min != requested.tm_min || normalized.tm_sec != requested.tm_sec) {
+        return std::nullopt;
+    }
+    std::int64_t milliseconds = static_cast<std::int64_t>(seconds) * 1000;
+    if (match[7].matched) {
+        std::string fraction = match[7];
+        while (fraction.size() < 3) fraction.push_back('0');
+        milliseconds += std::stoi(fraction);
+    }
+    if (match[9].matched) {
+        const auto offset = (std::stoi(match[10]) * 60 + std::stoi(match[11])) * 60LL * 1000LL;
+        milliseconds += match[9].str() == "+" ? -offset : offset;
+    }
+    return milliseconds;
+}
+
+std::string formatSeoul(std::int64_t epochMs) {
+    const auto localMs = epochMs + 9LL * 60LL * 60LL * 1000LL;
+    const std::time_t seconds = static_cast<std::time_t>(localMs / 1000);
+    std::tm tm{};
+    gmtime_r(&seconds, &tm);
+    std::ostringstream out;
+    out << std::put_time(&tm, "%Y-%m-%dT%H:%M:%S") << "+09:00";
+    return out.str();
+}
+
+std::string encodeQuery(const std::string& value) {
+    std::ostringstream out;
+    out << std::uppercase << std::hex;
+    for (const unsigned char ch : value) {
+        if (std::isalnum(ch) || ch == '-' || ch == '_' || ch == '.' || ch == '~') {
+            out << static_cast<char>(ch);
+        } else {
+            out << '%' << std::setw(2) << std::setfill('0') << static_cast<int>(ch);
+        }
+    }
+    return out.str();
+}
+
+json segmentJson(const PlaybackSegmentRecord& segment) {
+    const auto endMs = segment.endMs.value_or(segment.startMs);
+    return {
+        {"segmentId", segment.segmentId},
+        {"recordStartAt", formatSeoul(segment.startMs)},
+        {"recordEndAt", segment.endMs ? json(formatSeoul(*segment.endMs)) : json(nullptr)},
+        {"durationSeconds", std::max<std::int64_t>(0, endMs - segment.startMs) / 1000.0},
+        {"eventType", "CONTINUOUS"},
+        {"thumbnailUrl", nullptr},
+        {"playbackUrl", nullptr},
+        {"fileSize", segment.fileSize},
+        {"status", segment.status}
+    };
+}
+
+} // namespace
+
+VmsPlaybackController::VmsPlaybackController(
+    HttpServer& server, VmsPlaybackService& service)
+    : httpServer_(server), service_(service) {
     handleGetSegmentList();
     handleGetTimelineList();
     handleStreamTimeRange();
-    handleDownloadTimeRange();
     handleGetSegment();
-    handleSegmentStream();
-    handleSegmentDownload();
-    handleSegmentThumbnail();
+    handleHlsSegment();
 }
 
-VmsPlaybackController::~VmsPlaybackController() {}
-
 void VmsPlaybackController::handleGetSegmentList() {
-httpServer.addRoute(HttpMethod::GET, "/devices/{deviceId}/playback/segments", [this](const Http::Request& req) -> Http::Response {
-    const std::string* deviceId = req.getPathParam("deviceId");
-    int channelId = 2;
-    int page = 1;
-    int size = 10;
-
-    if (const auto* v = req.getQueryParam("channelId")) { channelId = std::stoi(*v); }
-
-    if (const auto* v = req.getQueryParam("page")) { page = std::stoi(*v); }
-
-    if (const auto* v = req.getQueryParam("size")) { size = std::stoi(*v); }
-
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        {"ok", true},
-        {"data", {
-            {"deviceId", deviceId ? std::stoi(*deviceId) : 1},
-            {"channelId", channelId},
-            {"page", page},
-            {"size", size},
-            {"totalCount", 124},
-            {"totalPages", 13},
-            {"items", json::array({
-                {
-                    {"segmentId", 1001},
-                    {"recordStartAt", "2026-05-14T10:00:00+09:00"},
-                    {"recordEndAt", "2026-05-14T10:00:10+09:00"},
-                    {"durationSeconds", 10},
-                    {"eventType", "CONTINUOUS"},
-                    {"thumbnailUrl", "/thumbnails/1001.jpg"},
-                    {"playbackUrl", "/playback/1001"},
-                    {"fileSize", 10485760}
-                },
-                {
-                    {"segmentId", 1002},
-                    {"recordStartAt", "2026-05-14T10:00:10+09:00"},
-                    {"recordEndAt", "2026-05-14T10:00:20+09:00"},
-                    {"durationSeconds", 10},
-                    {"eventType", "MOTION"},
-                    {"thumbnailUrl", "/thumbnails/1002.jpg"},
-                    {"playbackUrl", "/playback/1002"},
-                    {"fileSize", 8252411}
-                }
-            })}
-        }},
-        {"error", nullptr}
-    };
-    res.body = response_body.dump();
-    return res;
-});
+    httpServer_.addRoute(HttpMethod::GET, "/devices/{deviceId}/playback/segments",
+        [this](const Http::Request& req) {
+        const auto deviceId = integer(req.getPathParam("deviceId"));
+        const auto channelId = integer(req.getQueryParam("channelId"));
+        auto page = integer(req.getQueryParam("page")).value_or(1);
+        auto size = integer(req.getQueryParam("size")).value_or(10);
+        if (!deviceId || !channelId || *deviceId <= 0 || *channelId <= 0 ||
+            page <= 0 || size <= 0 || size > 100) {
+            return errorResponse(HttpCode::Bad_Request, "INVALID_REQUEST",
+                "deviceId/channelId must be positive; page >= 1 and size must be 1..100");
+        }
+        const auto target = service_.findTarget(*deviceId, *channelId);
+        if (!target) return errorResponse(HttpCode::Not_Found, "PLAYBACK_TARGET_NOT_FOUND",
+            "enabled device/channel/profile was not found");
+        const auto result = service_.findPage(target->profileId, page, size);
+        json items = json::array();
+        for (const auto& item : result.items) items.push_back(segmentJson(item));
+        return jsonResponse(HttpCode::OK, {
+            {"deviceId", *deviceId}, {"channelId", *channelId},
+            {"page", page}, {"size", size}, {"totalCount", result.totalCount},
+            {"totalPages", size ? (result.totalCount + size - 1) / size : 0},
+            {"items", items}});
+    });
 }
 
 void VmsPlaybackController::handleGetTimelineList() {
-httpServer.addRoute(HttpMethod::GET, "/devices/{deviceId}/playback/timeline", [this](const Http::Request& req) -> Http::Response {
-    const std::string* deviceId = req.getPathParam("deviceId");
-    int channelId = 1;
-    std::string date = "2026-05-14";
-
-    if (const auto* v = req.getQueryParam("channelId")) { channelId = std::stoi(*v); }
-
-    if (const auto* v = req.getQueryParam("date")) { date = *v; }
-
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        {"ok", true},
-        {"data", {
-            {"deviceId", deviceId ? std::stoi(*deviceId) : 1},
-            {"channelId", channelId},
-            {"date", date},
-            {"timezone", "Asia/Seoul"},
-            {"items", json::array({
-                {
-                    {"startAt", "2026-05-14T09:00:00+09:00"},
-                    {"endAt", "2026-05-14T09:30:00+09:00"},
-                    {"recordType", "CONTINUOUS"},
-                    {"segmentCount", 180},
-                    {"playbackUrl", "/devices/1/playback/stream?channelId=1&from=2026-05-14T09:00:00%2B09:00&to=2026-05-14T09:30:00%2B09:00"}
-                },
-                {
-                    {"startAt", "2026-05-14T10:10:00+09:00"},
-                    {"endAt", "2026-05-14T11:00:00+09:00"},
-                    {"recordType", "MOTION"},
-                    {"segmentCount", 300},
-                    {"playbackUrl", "/devices/1/playback/stream?channelId=1&from=2026-05-14T10:10:00%2B09:00&to=2026-05-14T11:00:00%2B09:00"}
-                }
-            })}
-        }},
-        {"error", nullptr}
-    };
-    res.body = response_body.dump();
-    return res;
-});
+    httpServer_.addRoute(HttpMethod::GET, "/devices/{deviceId}/playback/timeline",
+        [this](const Http::Request& req) {
+        const auto deviceId = integer(req.getPathParam("deviceId"));
+        const auto channelId = integer(req.getQueryParam("channelId"));
+        const auto* date = req.getQueryParam("date");
+        if (!deviceId || !channelId || !date) return errorResponse(
+            HttpCode::Bad_Request, "INVALID_REQUEST", "deviceId, channelId and date are required");
+        const auto from = parseIso8601(*date + "T00:00:00+09:00");
+        if (!from || date->size() != 10) return errorResponse(
+            HttpCode::Bad_Request, "INVALID_DATE", "date must be YYYY-MM-DD");
+        const auto target = service_.findTarget(*deviceId, *channelId);
+        if (!target) return errorResponse(HttpCode::Not_Found, "PLAYBACK_TARGET_NOT_FOUND",
+            "enabled device/channel/profile was not found");
+        const auto to = *from + 24LL * 60LL * 60LL * 1000LL;
+        const auto segments = service_.findRange(target->profileId, *from, to);
+        json items = json::array();
+        std::size_t index = 0;
+        while (index < segments.size()) {
+            auto rangeStart = segments[index].startMs;
+            auto rangeEnd = segments[index].endMs.value_or(rangeStart);
+            std::size_t count = 1;
+            ++index;
+            while (index < segments.size() && segments[index].startMs <= rangeEnd + 1500) {
+                rangeEnd = std::max(rangeEnd, segments[index].endMs.value_or(segments[index].startMs));
+                ++count;
+                ++index;
+            }
+            const auto fromText = formatSeoul(rangeStart);
+            const auto toText = formatSeoul(rangeEnd);
+            std::ostringstream url;
+            url << "/devices/" << *deviceId << "/playback/stream?channelId=" << *channelId
+                << "&from=" << encodeQuery(fromText) << "&to=" << encodeQuery(toText);
+            items.push_back({{"startAt", fromText}, {"endAt", toText},
+                {"recordType", "CONTINUOUS"}, {"segmentCount", count},
+                {"playbackUrl", url.str()}});
+        }
+        return jsonResponse(HttpCode::OK, {{"deviceId", *deviceId}, {"channelId", *channelId},
+            {"date", *date}, {"timezone", "Asia/Seoul"}, {"items", items}});
+    });
 }
 
 void VmsPlaybackController::handleStreamTimeRange() {
-httpServer.addRoute(HttpMethod::GET, "/devices/{deviceId}/playback/stream", [this](const Http::Request& req) -> Http::Response {
-    const std::string* deviceId = req.getPathParam("deviceId");
-    int channelId = 1;
-    std::string from = "2026-05-14T09:00:00+09:00";
-    std::string to = "2026-05-14T09:30:00+09:00";
-
-    if (const auto* v = req.getQueryParam("channelId")) { channelId = std::stoi(*v); }
-
-    if (const auto* v = req.getQueryParam("from")) { from = *v; }
-
-    if (const auto* v = req.getQueryParam("to")) { to = *v; }
-
-    (void)deviceId;
-    (void)channelId;
-    (void)from;
-    (void)to;
-
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/vnd.apple.mpegurl");
-    res.body =
-        "#EXTM3U\n"
-        "#EXT-X-TARGETDURATION:4\n"
-        "\n"
-        "#EXT-X-PROGRAM-DATE-TIME:2026-05-14T09:00:00+09:00\n"
-        "#EXTINF:4.0,\n"
-        "/playbacks/1001/stream\n"
-        "\n"
-        "#EXT-X-PROGRAM-DATE-TIME:2026-05-14T09:00:04+09:00\n"
-        "#EXTINF:4.0,\n"
-        "/playbacks/1002/stream\n";
-    return res;
-});
-}
-
-void VmsPlaybackController::handleDownloadTimeRange() {
-httpServer.addRoute(HttpMethod::GET, "/devices/{deviceId}/playback/download", [this](const Http::Request& req) -> Http::Response {
-    const std::string* deviceId = req.getPathParam("deviceId");
-    int channelId = 1;
-    std::string from = "2026-05-14T09:00:00+09:00";
-    std::string to = "2026-05-14T09:30:00+09:00";
-
-    if (const auto* v = req.getQueryParam("channelId")) { channelId = std::stoi(*v); }
-
-    if (const auto* v = req.getQueryParam("from")) { from = *v; }
-
-    if (const auto* v = req.getQueryParam("to")) { to = *v; }
-
-    (void)deviceId;
-    (void)channelId;
-    (void)from;
-    (void)to;
-
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "video/mp4");
-    res.headers.set("Content-Disposition", "attachment; filename=\"device_1_ch_1_20260514_090000_093000.mp4\"");
-    res.body = "[ merged MP4 binary data ]";
-    return res;
-});
+    httpServer_.addRoute(HttpMethod::GET, "/devices/{deviceId}/playback/stream",
+        [this](const Http::Request& req) {
+        const auto deviceId = integer(req.getPathParam("deviceId"));
+        const auto channelId = integer(req.getQueryParam("channelId"));
+        const auto* fromText = req.getQueryParam("from");
+        const auto* toText = req.getQueryParam("to");
+        if (!deviceId || !channelId || !fromText || !toText) return errorResponse(
+            HttpCode::Bad_Request, "INVALID_REQUEST", "deviceId, channelId, from and to are required");
+        const auto from = parseIso8601(*fromText);
+        const auto to = parseIso8601(*toText);
+        if (!from || !to || *from >= *to || *to - *from > 60LL * 60LL * 1000LL) return errorResponse(
+            HttpCode::Bad_Request, "INVALID_TIME_RANGE",
+            "from/to must be valid ISO-8601; the range must be greater than 0 and at most 1 hour");
+        const auto target = service_.findTarget(*deviceId, *channelId);
+        if (!target) return errorResponse(HttpCode::Not_Found, "PLAYBACK_TARGET_NOT_FOUND",
+            "enabled device/channel/profile was not found");
+        auto hls = service_.createHls(*target, *from, *to);
+        if (!hls.ok) return errorResponse(
+            hls.notFound ? HttpCode::Not_Found : HttpCode::Internal_Server_Error,
+            hls.notFound ? "RECORDING_NOT_FOUND" : "HLS_GENERATION_FAILED", hls.errorMessage);
+        Http::Response response;
+        response.setStatus(HttpCode::OK);
+        response.headers.set("Content-Type", "application/vnd.apple.mpegurl");
+        response.headers.set("Cache-Control", "no-store");
+        response.headers.set("X-Playback-Session-Id", hls.sessionId);
+        response.body = std::move(hls.playlist);
+        return response;
+    });
 }
 
 void VmsPlaybackController::handleGetSegment() {
-httpServer.addRoute(HttpMethod::GET, "/playbacks/{segmentId}", [this](const Http::Request& req) -> Http::Response {
-    const std::string* segmentId = req.getPathParam("segmentId");
-
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "application/json");
-    json response_body = {
-        {"ok", true},
-        {"data", {
-            {"segmentId", segmentId ? std::stoi(*segmentId) : 1001},
-            {"deviceId", 1},
-            {"deviceName", "Main Gate CCTV"},
-            {"channelId", 2},
-            {"channelName", "CH-02"},
-            {"recordStartAt", "2026-05-14T09:00:00+09:00"},
-            {"recordEndAt", "2026-05-14T09:00:10+09:00"},
-            {"durationSeconds", 10},
-            {"recordType", "CONTINUOUS"},
-            {"eventType", nullptr},
-            {"codec", "H264"},
-            {"container", "MP4"},
-            {"resolution", "1920x1080"},
-            {"fps", 30},
-            {"fileSize", 10485760},
-            {"thumbnailUrl", "/playbacks/1001/thumbnail"},
-            {"streamUrl", "/playbacks/1001/stream"},
-            {"downloadUrl", "/playbacks/1001/download"},
-            {"createdAt", "2026-05-14T09:00:11+09:00"}
-        }},
-        {"error", nullptr}
-    };
-    res.body = response_body.dump();
-    return res;
-});
+    httpServer_.addRoute(HttpMethod::GET, "/playbacks/{segmentId}",
+        [this](const Http::Request& req) {
+        const auto segmentId = integer(req.getPathParam("segmentId"));
+        if (!segmentId || *segmentId <= 0) return errorResponse(
+            HttpCode::Bad_Request, "INVALID_SEGMENT_ID", "segmentId must be positive");
+        const auto segment = service_.findSegment(*segmentId);
+        if (!segment) return errorResponse(HttpCode::Not_Found, "SEGMENT_NOT_FOUND",
+            "recording segment was not found");
+        auto data = segmentJson(*segment);
+        data["deviceId"] = segment->deviceId;
+        data["deviceName"] = segment->deviceName;
+        data["channelId"] = segment->channelId;
+        data["channelName"] = segment->channelName;
+        data["recordType"] = "CONTINUOUS";
+        data["codec"] = segment->codec;
+        data["container"] = "MP4";
+        return jsonResponse(HttpCode::OK, data);
+    });
 }
 
-void VmsPlaybackController::handleSegmentStream() {
-httpServer.addRoute(HttpMethod::GET, "/playbacks/{segmentId}/stream", [this](const Http::Request& req) -> Http::Response {
-    const std::string* segmentId = req.getPathParam("segmentId");
-    (void)segmentId;
-
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "video/mp4");
-    res.headers.set("Cache-Control", "private, max-age=3600");
-    res.headers.set("Accept-Ranges", "bytes");
-    res.body = "[ MP4 stream binary data ]";
-    return res;
-});
-}
-
-void VmsPlaybackController::handleSegmentDownload() {
-httpServer.addRoute(HttpMethod::GET, "/playbacks/{segmentId}/download", [this](const Http::Request& req) -> Http::Response {
-    const std::string* segmentId = req.getPathParam("segmentId");
-    (void)segmentId;
-
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "video/mp4");
-    res.headers.set("Content-Disposition", "attachment; filename=\"cam01_20260514_090000.mp4\"");
-    res.body = "[ MP4 binary data ]";
-    return res;
-});
-}
-
-void VmsPlaybackController::handleSegmentThumbnail() {
-httpServer.addRoute(HttpMethod::GET, "/playbacks/{segmentId}/thumbnail", [this](const Http::Request& req) -> Http::Response {
-    const std::string* segmentId = req.getPathParam("segmentId");
-    int width = 480;
-    int height = 360;
-
-    if (const auto* v = req.getQueryParam("width")) { width = std::stoi(*v); }
-
-    if (const auto* v = req.getQueryParam("height")) { height = std::stoi(*v); }
-
-    if (const auto* v = req.getQueryParam("hight")) { height = std::stoi(*v); }
-
-    (void)segmentId;
-    (void)width;
-    (void)height;
-
-    // TODO 아래는 예시
-    Http::Response res;
-    res.setStatus(HttpCode::OK);
-    res.headers.set("Content-Type", "image/jpeg");
-    res.headers.set("Cache-Control", "public, max-age=86400");
-    res.body = "[ JPEG binary data ]";
-    return res;
-});
+void VmsPlaybackController::handleHlsSegment() {
+    httpServer_.addRoute(HttpMethod::GET,
+        "/playback/sessions/{sessionId}/segments/{fileName}",
+        [this](const Http::Request& req) {
+        const auto* sessionId = req.getPathParam("sessionId");
+        const auto* fileName = req.getPathParam("fileName");
+        if (!sessionId || !fileName) return errorResponse(
+            HttpCode::Bad_Request, "INVALID_HLS_SEGMENT", "sessionId and fileName are required");
+        auto result = service_.readHlsSegment(*sessionId, *fileName);
+        if (!result.ok) return errorResponse(HttpCode::Not_Found,
+            "HLS_SEGMENT_NOT_FOUND", result.errorMessage);
+        Http::Response response;
+        response.setStatus(HttpCode::OK);
+        response.headers.set("Content-Type", "video/mp2t");
+        response.headers.set("Cache-Control", "private, max-age=900");
+        response.body = std::move(result.body);
+        return response;
+    });
 }

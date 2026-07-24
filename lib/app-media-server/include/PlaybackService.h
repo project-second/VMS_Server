@@ -93,9 +93,13 @@ struct PlaybackSeekResult {
 // - HLS player용 session playback offset과 CCTV 절대시간 offset을 구분한다.
 class PlaybackService {
 public:
+    PlaybackService() = default;
     explicit PlaybackService(const RecordingSegmentStore& segment_store);
 
     PlaybackResponse create_session(const PlaybackRequest& request) const;
+    PlaybackResponse create_session(
+        const PlaybackRequest& request,
+        std::vector<RecordingSegment> segments) const;
 
     PlaybackSeekResult seek(
         const PlaybackSession& session,
@@ -131,5 +135,5 @@ private:
     );
 
 private:
-    const RecordingSegmentStore& segment_store_;
+    const RecordingSegmentStore* segment_store_ = nullptr;
 };

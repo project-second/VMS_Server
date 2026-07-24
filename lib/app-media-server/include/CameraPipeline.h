@@ -4,6 +4,7 @@
 #include <gst/gst.h>
 #include <gst/app/gstappsink.h>
 
+#include <cstdint>
 #include <string>
 
 #include "RecordingSegmentStore.h"
@@ -16,6 +17,7 @@ enum class CameraPipelineEvent {
 
 class CameraPipeline {
 private:
+    std::int64_t profile_id_ = 0;
     std::string camera_id_;
     std::string rtsp_uri_;
     std::string record_pattern_;
@@ -50,6 +52,7 @@ private:
 
 public:
     CameraPipeline(
+        std::int64_t profile_id,
         std::string camera_id,
         std::string rtsp_uri,
         std::string record_pattern,

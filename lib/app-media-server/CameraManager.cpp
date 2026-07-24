@@ -32,6 +32,7 @@ bool CameraManager::add_camera(const CameraConfig& config) {
     //    ONVIF profile token 같은 외부 식별자는 여기로 전달하지 않는다.
     //    이 계층은 최종 RTSP URI를 받은 뒤 녹화만 담당한다.
     auto worker = std::make_unique<CameraWorker>(
+        config.profile_id,
         config.camera_id,
         config.rtsp_uri,
         config.record_pattern,

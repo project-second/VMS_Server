@@ -1,0 +1,111 @@
+mapper:
+  namespace: playback
+  objects:
+    - id: findTarget
+      sequence: select
+      query: >
+        SELECT d.device_id, c.channel_id, p.profile_id,
+               d.name AS device_name, c.name AS channel_name
+        FROM devices d
+        JOIN channels c ON c.device_id = d.device_id AND c.enabled = true
+        JOIN LATERAL (
+          SELECT p0.profile_id
+          FROM profiles p0
+          WHERE p0.channel_id = c.channel_id AND p0.enabled = true
+          ORDER BY CASE WHEN p0.profile_no = c.use_profile THEN 0 ELSE 1 END,
+                   p0.profile_no, p0.profile_id
+          LIMIT 1
+        ) selected ON true
+        JOIN profiles p ON p.profile_id = selected.profile_id
+        WHERE d.device_id = #{device_id} AND c.channel_id = #{channel_id}
+        LIMIT 1
+
+    - id: findPage
+      sequence: select
+      query: >
+        SELECT s.seg_id, s.profile_id, s.file_path,
+               (extract(epoch FROM s.start_ts) * 1000)::bigint AS start_ms,
+               CASE WHEN s.end_ts IS NULL THEN NULL
+                    ELSE (extract(epoch FROM s.end_ts) * 1000)::bigint END AS end_ms,
+               s.file_size, s.codec, s.status, s.has_gap,
+               count(*) OVER ()::bigint AS total_count
+        FROM archive_segment s
+        WHERE s.profile_id = #{profile_id}
+          AND s.status IN ('completed', 'interrupted')
+          AND s.end_ts IS NOT NULL
+        ORDER BY s.start_ts DESC
+        LIMIT #{limit} OFFSET #{offset}
+
+    - id: countByProfile
+      sequence: select
+      query: >
+        SELECT count(*)::bigint AS total_count
+        FROM archive_segment
+        WHERE profile_id = #{profile_id}
+          AND status IN ('completed', 'interrupted')
+          AND end_ts IS NOT NULL
+
+    - id: findRange
+      sequence: select
+      query: >
+        SELECT s.seg_id, s.profile_id, s.file_path,
+               (extract(epoch FROM s.start_ts) * 1000)::bigint AS start_ms,
+               (extract(epoch FROM s.end_ts) * 1000)::bigint AS end_ms,
+               s.file_size, s.codec, s.status, s.has_gap
+        FROM archive_segment s
+        WHERE s.profile_id = #{profile_id}
+          AND s.status IN ('completed', 'interrupted')
+          AND s.end_ts IS NOT NULL
+          AND s.start_ts < to_timestamp(#{to_ms} / 1000.0)
+          AND s.end_ts > to_timestamp(#{from_ms} / 1000.0)
+        ORDER BY s.start_ts, s.seg_id
+
+    - id: findById
+      sequence: select
+      query: >
+        SELECT s.seg_id, s.profile_id, s.file_path,
+               (extract(epoch FROM s.start_ts) * 1000)::bigint AS start_ms,
+               CASE WHEN s.end_ts IS NULL THEN NULL
+                    ELSE (extract(epoch FROM s.end_ts) * 1000)::bigint END AS end_ms,
+               s.file_size, s.codec, s.status, s.has_gap,
+               d.device_id, c.channel_id,
+               d.name AS device_name, c.name AS channel_name
+        FROM archive_segment s
+        JOIN profiles p ON p.profile_id = s.profile_id
+        JOIN channels c ON c.channel_id = p.channel_id
+        JOIN devices d ON d.device_id = c.device_id
+        WHERE s.seg_id = #{seg_id}
+        LIMIT 1
+
+    - id: saveStarted
+      sequence: insert
+      query: >
+        INSERT INTO archive_segment (
+          profile_id, file_path, start_ts, codec, status, has_gap
+        ) VALUES (
+          #{profile_id}, #{file_path}, to_timestamp(#{start_ms} / 1000.0),
+          #{codec}, 'recording', false
+        )
+        ON CONFLICT (file_path) DO UPDATE SET
+          profile_id = EXCLUDED.profile_id,
+          start_ts = EXCLUDED.start_ts,
+          end_ts = NULL,
+          file_size = NULL,
+          codec = EXCLUDED.codec,
+          status = 'recording',
+          has_gap = false
+
+    - id: saveClosed
+      sequence: update
+      query: >
+        UPDATE archive_segment
+        SET end_ts = to_timestamp(#{end_ms} / 1000.0),
+            file_size = #{file_size}, codec = #{codec}, status = #{status}
+        WHERE file_path = #{file_path}
+
+    - id: interruptStale
+      sequence: update
+      query: >
+        UPDATE archive_segment
+        SET status = 'interrupted', end_ts = COALESCE(end_ts, NOW()), has_gap = true
+        WHERE status = 'recording'

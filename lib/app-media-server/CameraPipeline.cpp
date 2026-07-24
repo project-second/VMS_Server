@@ -15,13 +15,15 @@ void unref_element_if_needed(GstElement*& element) {
 } // namespace
 
 CameraPipeline::CameraPipeline(
+    std::int64_t profile_id,
     std::string camera_id,
     std::string rtsp_uri,
     std::string record_pattern,
     int split_seconds,
     RecordingSegmentStore* segment_store
 )
-    : camera_id_(std::move(camera_id)),
+    : profile_id_(profile_id),
+      camera_id_(std::move(camera_id)),
       rtsp_uri_(std::move(rtsp_uri)),
       record_pattern_(std::move(record_pattern)),
       split_seconds_(split_seconds),
@@ -609,6 +611,7 @@ gchar* CameraPipeline::handle_format_location(guint fragment_id) {
     // 2. Segment 시작 기록
     if (segment_store_ != nullptr) {
         segment_store_->on_segment_started(
+            profile_id_,
             camera_id_,
             path
         );

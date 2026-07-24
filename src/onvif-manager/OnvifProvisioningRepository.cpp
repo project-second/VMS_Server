@@ -185,3 +185,14 @@ bool OnvifProvisioningRepository::upsertProfiles(std::int64_t channelId, const P
 
     return ok;
 }
+
+std::optional<std::int64_t> OnvifProvisioningRepository::findProfileId(
+    std::int64_t channelId,
+    const std::string& profileToken) {
+    DbTemplate::ParamMap params;
+    params.emplace("channel_id", channelId);
+    params.emplace("onvif_profile_token", profileToken);
+    return firstId(
+        AppDb::select("onvif.getProfileByChannelAndToken", params),
+        "profile_id");
+}

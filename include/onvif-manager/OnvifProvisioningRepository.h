@@ -28,6 +28,10 @@ public:
     // channel 아래의 ONVIF media profiles를 profiles 테이블에 반영한다.
     bool upsertProfiles(std::int64_t channelId, const ProvisioningResult& result);
 
+    std::optional<std::int64_t> findProfileId(
+        std::int64_t channelId,
+        const std::string& profileToken);
+
 private:
     // devices와 device_health를 갱신하고 devices.device_id를 반환한다.
     std::optional<std::int64_t> upsertDevice(const ProvisioningResult& result);

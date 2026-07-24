@@ -131,6 +131,7 @@ set(VMS_GSTREAMER_PLUGIN_FILES
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstcoreelements.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstapp.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstisomp4.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstmpegtsmux.so
 )
 
 foreach(plugin_file IN LISTS VMS_GSTREAMER_PLUGIN_FILES)
@@ -161,6 +162,7 @@ install(CODE [[
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstcoreelements.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstapp.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstisomp4.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstmpegtsmux.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer1.0/gstreamer-1.0/gst-plugin-scanner"
     )
 
