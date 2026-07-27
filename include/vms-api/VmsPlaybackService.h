@@ -24,6 +24,7 @@ struct PlaybackHlsResult {
 
 struct PlaybackBinaryResult {
     bool ok = false;
+    bool unauthorized = false;
     std::string errorMessage;
     std::string body;
 };
@@ -49,9 +50,18 @@ public:
         const PlaybackTargetRecord& target,
         std::int64_t fromMs, std::int64_t toMs);
     PlaybackBinaryResult readHlsSegment(
-        const std::string& sessionId, const std::string& fileName);
+        const std::string& sessionId,
+        const std::string& fileName,
+        const std::string& accessToken);
 
 private:
+    struct AuthorizedHlsSession {
+        HlsVodSession session;
+        std::string accessToken;
+    };
+
+    static std::string createAccessToken();
+    static bool tokensEqual(const std::string& lhs, const std::string& rhs);
     void cleanupExpiredSessions();
 
     VmsPlaybackRepository& repository_;
@@ -60,6 +70,6 @@ private:
     HlsVodConverter converter_;
     HlsVodPlaylistBuilder playlistBuilder_;
     std::mutex sessionsMutex_;
-    std::unordered_map<std::string, HlsVodSession> sessions_;
+    std::unordered_map<std::string, AuthorizedHlsSession> sessions_;
     std::chrono::minutes sessionTtl_{15};
 };

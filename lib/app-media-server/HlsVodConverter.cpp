@@ -59,21 +59,21 @@ std::string pop_bus_error_message(GstBus* bus) {
 }
 
 bool caps_is_h264_video(GstCaps* caps) {
-    if (caps == nullptr || gst_caps_is_empty(caps)) {
+    if (caps == nullptr || gst_caps_is_empty(caps) || gst_caps_is_any(caps)) {
         return false;
     }
 
-    GstStructure* structure = gst_caps_get_structure(caps, 0);
-    if (structure == nullptr) {
-        return false;
+    const guint size = gst_caps_get_size(caps);
+    for (guint index = 0; index < size; ++index) {
+        const GstStructure* structure = gst_caps_get_structure(caps, index);
+        const char* name = structure == nullptr
+            ? nullptr
+            : gst_structure_get_name(structure);
+        if (name != nullptr && std::string(name) == "video/x-h264") {
+            return true;
+        }
     }
-
-    const char* name = gst_structure_get_name(structure);
-    if (name == nullptr) {
-        return false;
-    }
-
-    return std::string(name) == "video/x-h264";
+    return false;
 }
 
 void unref_object(GstObject* object) {
@@ -115,7 +115,13 @@ void on_qtdemux_pad_added(
         gst_caps_unref(caps);
     }
 
-    if (!is_h264) {
+    // qtdemux의 pad-added 시점에는 current caps가 아직 고정되지 않아
+    // query 결과가 ANY일 수 있다. 이 경우 qtdemux의 video_N pad 이름으로
+    // 영상 pad를 식별하고, 실제 H264 여부는 뒤의 h264parse가 검증한다.
+    const char* pad_name = GST_PAD_NAME(new_pad);
+    const bool is_video_pad = pad_name != nullptr &&
+        g_str_has_prefix(pad_name, "video_");
+    if (!is_h264 && !is_video_pad) {
         return;
     }
 
@@ -473,7 +479,6 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
     g_object_set(filesrc, "location", segment.source_file_path.c_str(), nullptr);
     g_object_set(filesink, "location", segment.output_file_path.string().c_str(), nullptr);
     g_object_set(filesink, "sync", FALSE, nullptr);
-    g_object_set(filesink, "async", FALSE, nullptr);
 
     // MPEG-TS 안의 H264는 byte-stream/AU 정렬 형태가 다루기 쉽다.
     g_object_set(h264parse, "config-interval", -1, nullptr);

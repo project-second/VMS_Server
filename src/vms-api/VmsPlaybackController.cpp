@@ -254,11 +254,16 @@ void VmsPlaybackController::handleHlsSegment() {
         [this](const Http::Request& req) {
         const auto* sessionId = req.getPathParam("sessionId");
         const auto* fileName = req.getPathParam("fileName");
+        const auto* token = req.getQueryParam("token");
         if (!sessionId || !fileName) return errorResponse(
             HttpCode::Bad_Request, "INVALID_HLS_SEGMENT", "sessionId and fileName are required");
-        auto result = service_.readHlsSegment(*sessionId, *fileName);
-        if (!result.ok) return errorResponse(HttpCode::Not_Found,
-            "HLS_SEGMENT_NOT_FOUND", result.errorMessage);
+        if (!token || token->empty()) return errorResponse(
+            HttpCode::Unauthorized, "INVALID_HLS_TOKEN", "HLS session token is required");
+        auto result = service_.readHlsSegment(*sessionId, *fileName, *token);
+        if (!result.ok) return errorResponse(
+            result.unauthorized ? HttpCode::Unauthorized : HttpCode::Not_Found,
+            result.unauthorized ? "INVALID_HLS_TOKEN" : "HLS_SEGMENT_NOT_FOUND",
+            result.errorMessage);
         Http::Response response;
         response.setStatus(HttpCode::OK);
         response.headers.set("Content-Type", "video/mp2t");

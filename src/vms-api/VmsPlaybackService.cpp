@@ -3,9 +3,14 @@
 #include "LogSync.h"
 
 #include <algorithm>
+#include <array>
 #include <fstream>
+#include <iomanip>
 #include <sstream>
 #include <system_error>
+
+#include <openssl/crypto.h>
+#include <openssl/rand.h>
 
 namespace {
 
@@ -118,6 +123,14 @@ PlaybackHlsResult VmsPlaybackService::createHls(
         return result;
     }
 
+    std::string accessToken;
+    try {
+        accessToken = createAccessToken();
+    } catch (const std::exception& error) {
+        result.errorMessage = error.what();
+        return result;
+    }
+
     std::ifstream input(hls.session->playlist_path);
     if (!input.is_open()) {
         result.errorMessage = "failed to read generated HLS playlist";
@@ -133,7 +146,8 @@ PlaybackHlsResult VmsPlaybackService::createHls(
             });
         if (found != hls.session->segments.end()) {
             rewritten << "/playback/sessions/" << hls.session->session_id
-                      << "/segments/" << found->output_file_name << "\n";
+                      << "/segments/" << found->output_file_name
+                      << "?token=" << accessToken << "\n";
         } else {
             rewritten << line << "\n";
         }
@@ -142,7 +156,8 @@ PlaybackHlsResult VmsPlaybackService::createHls(
     cleanupExpiredSessions();
     {
         std::lock_guard<std::mutex> lock(sessionsMutex_);
-        sessions_[hls.session->session_id] = *hls.session;
+        sessions_[hls.session->session_id] = AuthorizedHlsSession{
+            *hls.session, std::move(accessToken)};
     }
     result.ok = true;
     result.sessionId = hls.session->session_id;
@@ -150,38 +165,64 @@ PlaybackHlsResult VmsPlaybackService::createHls(
     return result;
 }
 
+std::string VmsPlaybackService::createAccessToken() {
+    std::array<unsigned char, 32> bytes{};
+    if (RAND_bytes(bytes.data(), static_cast<int>(bytes.size())) != 1) {
+        throw std::runtime_error("failed to generate HLS session access token");
+    }
+    std::ostringstream token;
+    token << std::hex << std::setfill('0');
+    for (const auto byte : bytes) {
+        token << std::setw(2) << static_cast<unsigned int>(byte);
+    }
+    return token.str();
+}
+
+bool VmsPlaybackService::tokensEqual(
+    const std::string& lhs, const std::string& rhs) {
+    return lhs.size() == rhs.size() && !lhs.empty() &&
+        CRYPTO_memcmp(lhs.data(), rhs.data(), lhs.size()) == 0;
+}
+
 PlaybackBinaryResult VmsPlaybackService::readHlsSegment(
-    const std::string& sessionId, const std::string& fileName) {
+    const std::string& sessionId,
+    const std::string& fileName,
+    const std::string& accessToken) {
     cleanupExpiredSessions();
     std::filesystem::path path;
     {
         std::lock_guard<std::mutex> lock(sessionsMutex_);
         const auto it = sessions_.find(sessionId);
-        if (it == sessions_.end()) return {false, "HLS session not found", {}};
+        if (it == sessions_.end() ||
+            !tokensEqual(it->second.accessToken, accessToken)) {
+            return {false, true, "invalid or expired HLS session token", {}};
+        }
         const auto segment = std::find_if(
-            it->second.segments.begin(), it->second.segments.end(),
+            it->second.session.segments.begin(), it->second.session.segments.end(),
             [&fileName](const HlsVodSegment& item) {
                 return item.output_file_name == fileName;
             });
-        if (segment == it->second.segments.end()) {
-            return {false, "HLS segment not found", {}};
+        if (segment == it->second.session.segments.end()) {
+            return {false, false, "HLS segment not found", {}};
         }
         path = segment->output_file_path;
     }
     std::ifstream input(path, std::ios::binary);
-    if (!input.is_open()) return {false, "HLS segment file not found", {}};
+    if (!input.is_open()) {
+        return {false, false, "HLS segment file not found", {}};
+    }
     std::ostringstream body;
     body << input.rdbuf();
-    return {true, {}, body.str()};
+    return {true, false, {}, body.str()};
 }
 
 void VmsPlaybackService::cleanupExpiredSessions() {
     const auto threshold = std::chrono::system_clock::now() - sessionTtl_;
     std::lock_guard<std::mutex> lock(sessionsMutex_);
     for (auto it = sessions_.begin(); it != sessions_.end();) {
-        if (it->second.created_at < threshold) {
+        if (it->second.session.created_at < threshold) {
             std::error_code error;
-            std::filesystem::remove_all(it->second.cache_dir, error);
+            std::filesystem::remove_all(it->second.session.cache_dir, error);
             it = sessions_.erase(it);
         } else {
             ++it;

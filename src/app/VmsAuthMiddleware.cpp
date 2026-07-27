@@ -4,6 +4,8 @@
 #include "VmsApiResponses.h"
 #include "VmsRequestHelpers.h"
 
+#include <regex>
+
 namespace {
 
 std::string requestPath(const Http::Request& req) {
@@ -14,10 +16,18 @@ bool requestMatches(const Http::Request& req, const std::string& method, const s
     return to_lower(req.method) == to_lower(method) && requestPath(req) == path;
 }
 
+bool isHlsSegmentRequest(const Http::Request& req) {
+    static const std::regex route(
+        R"(^/playback/sessions/[^/]+/segments/[^/]+$)");
+    return to_lower(req.method) == "get" &&
+        std::regex_match(requestPath(req), route);
+}
+
 bool isPublicHttpApi(const Http::Request& req) {
     return requestMatches(req, "POST", "/users/login")
         || requestMatches(req, "POST", "/users/signup")
-        || requestMatches(req, "POST", "/users/token/refresh");
+        || requestMatches(req, "POST", "/users/token/refresh")
+        || isHlsSegmentRequest(req);
 }
 
 bool isAdminHttpApi(const Http::Request& req) {
