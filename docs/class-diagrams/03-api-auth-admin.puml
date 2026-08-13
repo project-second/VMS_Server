@@ -1,0 +1,212 @@
+@startuml
+title VMS Server - User, Admin, and Authentication API
+
+!include _style.puml
+left to right direction
+
+package "HTTP / Middleware" #E3F2FD {
+  class VmsAuthMiddleware {
+    -userService_: VmsUserService&
+    -adminService_: VmsAdminService&
+    +operator()(req: Http::Request): optional<Http::Response>
+  }
+
+  class VmsUserController {
+    -httpServer: HttpServer&
+    -userService: VmsUserService&
+    -handleUserLogin(): void
+    -handleUserLogout(): void
+    -handleUserSignup(): void
+    -handleGetUserInfo(): void
+    -handleUpdateUserInfo(): void
+    -handleDeleteUser(): void
+    -handleRefreshToken(): void
+  }
+
+  class VmsAdminController {
+    -httpServer: HttpServer&
+    -adminService: VmsAdminService&
+    -handleGetUserApprovals(): void
+    -handleApproveUser(): void
+    -handleRejectUser(): void
+    -handleGetUsersRole(): void
+    -handleAddUserRole(): void
+    -handleDeleteUserRole(): void
+    -handleUserDisactivation(): void
+  }
+
+  class "VmsRequest" as VmsRequestHelpers <<namespace>> {
+    +extractBearerToken(req): optional<string>
+    +authenticatedUserId(req): optional<int64>
+    +parseJsonObject(req): optional<json>
+    +parsePathInt64(req, key, out): bool
+    +parsePositiveInt(value, out, maxValue): bool
+  }
+  class "VmsApiResponse" as VmsApiResponses <<namespace>> {
+    +jsonResponse(code, body): Http::Response
+    +successResponse(data, code): Http::Response
+    +errorResponse(code, errorCode, ...): Http::Response
+    +invalidTokenResponse(): Http::Response
+    +invalidArgumentResponse(): Http::Response
+    +internalServerErrorResponse(): Http::Response
+    +forbiddenResponse(errorCode): Http::Response
+    +conflictResponse(errorCode): Http::Response
+    +notFoundResponse(): Http::Response
+  }
+}
+
+package "User Domain" #E8F5E9 {
+  class VmsUserService {
+    -userRepository: VmsUserRepository&
+    +login(loginId, pw): LoginResult
+    +signup(loginId, name, pw): SignupStatus
+    +logout(accessToken, refreshToken): LogoutStatus
+    +refreshToken(refreshToken): RefreshResult
+    +validateAccessToken(token): TokenValidationResult
+    +getUserInfo(userId): UserInfoResult
+    +updateUserInfo(...): UpdateResult
+    +deleteUser(userId, password): DeleteStatus
+  }
+
+  class VmsUserRepository {
+    +findByLoginId(loginId): optional<UserRecord>
+    +findById(userId): optional<UserRecord>
+    +findRoleCodes(userId): vector<string>
+    +createUser(...): bool
+    +createPendingApproval(userId): bool
+    +updateLastLogin(userId): bool
+    +updateName(...): bool
+    +updatePassword(...): bool
+    +deactivate(userId): bool
+  }
+
+  class "VmsUserRepository::UserRecord" as UserRecord <<record>> {
+    +userId: int64
+    +loginId: string
+    +name: string
+    +pwHash: string
+    +isActive: bool
+    +createdAt: string
+    +lastLoginAt: string
+    +approvalStatus: string
+  }
+
+  class "VmsUserService::LoginResult" as LoginResult <<DTO>> {
+    +status: LoginStatus
+    +accessToken: string
+    +refreshToken: string
+    +expiresIn: int64
+    +refreshExpiresIn: int64
+    +issuedAt: string
+  }
+  class "VmsUserService::TokenValidationResult" as TokenValidationResult <<DTO>> {
+    +status: TokenStatus
+    +userId: int64
+  }
+  class "VmsUserService::RefreshResult" as RefreshResult <<DTO>>
+  class "VmsUserService::UserInfoResult" as UserInfoResult <<DTO>>
+  class "VmsUserService::UpdateResult" as UserUpdateResult <<DTO>>
+  class TokenSession <<private struct>> {
+    +userId: int64
+    +expiresAt: time_point
+  }
+}
+
+package "Admin Domain" #FFF3E0 {
+  class VmsAdminService {
+    -adminRepository: VmsAdminRepository&
+    +checkAdmin(userId): AdminCheckStatus
+    +getUserApprovals(page, size, status): ApprovalListResult
+    +approveUser(approvalId, adminUserId, roleCodes): MutationStatus
+    +rejectUser(approvalId, adminUserId, reason): MutationStatus
+    +getUserRoles(userId): RoleListResult
+    +addUserRole(userId, adminUserId, roleCode): MutationStatus
+    +deleteUserRole(userId, roleCode): MutationStatus
+    +updateUserActiveStatus(userId, active): MutationStatus
+  }
+
+  class VmsAdminRepository {
+    +findUserById(userId): optional<UserRecord>
+    +userHasRole(userId, roleCode): bool
+    +listApprovals(status, limit, offset): vector<ApprovalRecord>
+    +approveApproval(approvalId, reviewedBy): bool
+    +rejectApproval(approvalId, reviewedBy, reason): bool
+    +findUserRoles(userId): vector<RoleRecord>
+    +addUserRole(userId, roleId, assignedBy): bool
+    +deleteUserRole(userId, roleId): bool
+    +updateUserActiveStatus(userId, active): bool
+  }
+
+  class "VmsAdminRepository::UserRecord" as AdminUserRecord <<record>>
+  class "VmsAdminRepository::ApprovalRecord" as ApprovalRecord <<record>> {
+    +approvalId: int64
+    +userId: int64
+    +loginId: string
+    +name: string
+    +status: string
+    +requestedAt: string
+  }
+  class "VmsAdminRepository::RoleRecord" as RoleRecord <<record>>
+  class "VmsAdminService::ApprovalItem" as ApprovalItem <<DTO>>
+  class "VmsAdminService::ApprovalListResult" as ApprovalListResult <<DTO>>
+  class "VmsAdminService::RoleItem" as RoleItem <<DTO>>
+  class "VmsAdminService::RoleListResult" as RoleListResult <<DTO>>
+}
+
+package "Library Boundaries" #F3E5F5 {
+  class HttpServer <<lib boundary>>
+  class AppDb <<lib boundary>>
+  class SecurityUtils <<lib boundary>>
+}
+
+VmsAuthMiddleware --> VmsUserService : validates access token
+VmsAuthMiddleware --> VmsAdminService : checks ADMIN role
+VmsAuthMiddleware ..> VmsRequestHelpers
+VmsAuthMiddleware ..> VmsApiResponses
+
+VmsUserController --> HttpServer : registers routes
+VmsUserController --> VmsUserService
+VmsUserController ..> VmsRequestHelpers
+VmsUserController ..> VmsApiResponses
+
+VmsAdminController --> HttpServer : registers routes
+VmsAdminController --> VmsAdminService
+VmsAdminController ..> VmsRequestHelpers
+VmsAdminController ..> VmsApiResponses
+
+VmsUserService --> VmsUserRepository
+VmsUserRepository ..> UserRecord : returns
+VmsUserRepository ..> AppDb : mapper queries
+VmsUserService ..> SecurityUtils : token / password hashing
+VmsUserService ..> LoginResult : returns
+VmsUserService ..> TokenValidationResult : returns
+VmsUserService ..> RefreshResult : returns
+VmsUserService ..> UserInfoResult : returns
+VmsUserService ..> UserUpdateResult : returns
+VmsUserService ..> TokenSession : process-memory maps
+
+VmsAdminService --> VmsAdminRepository
+VmsAdminRepository ..> AdminUserRecord : returns
+VmsAdminRepository ..> ApprovalRecord : returns
+VmsAdminRepository ..> RoleRecord : returns
+VmsAdminRepository ..> AppDb : mapper queries
+VmsAdminService ..> ApprovalItem : maps record
+VmsAdminService ..> ApprovalListResult : returns
+VmsAdminService ..> RoleItem : maps record
+VmsAdminService ..> RoleListResult : returns
+
+ApprovalListResult o-- "0..*" ApprovalItem : items
+RoleListResult o-- "0..*" RoleItem : roles
+
+note bottom of VmsUserService
+  Additional nested status enums:
+  LoginStatus, SignupStatus, LogoutStatus, TokenStatus,
+  RefreshStatus, UserInfoStatus, UpdateStatus, DeleteStatus.
+end note
+
+note bottom of VmsAdminService
+  Additional nested status enums:
+  AdminCheckStatus, ListStatus, MutationStatus.
+end note
+
+@enduml

@@ -1,0 +1,171 @@
+@startuml
+title app-media-server - Recording Pipeline and RTSP Relay
+
+!include _style.puml
+left to right direction
+
+package "Camera Lifecycle" #E3F2FD {
+  class CameraConfig <<struct>> {
+    +profile_id: int64
+    +camera_id: string
+    +rtsp_uri: string
+    +record_pattern: string
+    +split_seconds: int
+  }
+
+  class CameraManager {
+    -running_: bool
+    -workers_: vector<unique_ptr<CameraWorker>>
+    -segment_store_: RecordingSegmentStore
+    +add_camera(config): bool
+    +remove_camera(camera_id): bool
+    +start_all(): void
+    +stop_all(): void
+    +segment_store(): RecordingSegmentStore&
+    +camera_count(): size_t
+    +is_running(): bool
+  }
+
+  class CameraWorker {
+    -profile_id_: int64
+    -camera_id_: string
+    -rtsp_uri_: string
+    -record_pattern_: string
+    -split_seconds_: int
+    -segment_store_: RecordingSegmentStore*
+    -stop_requested_: atomic_bool
+    -worker_thread_: thread
+    +start(): void
+    +stop(): void
+    +camera_id(): const string&
+    -run(): void
+  }
+}
+
+package "GStreamer Recording Pipeline" #E8F5E9 {
+  enum CameraPipelineEvent {
+    None
+    Error
+    Eos
+  }
+
+  class CameraPipeline {
+    -profile_id_: int64
+    -camera_id_: string
+    -rtsp_uri_: string
+    -record_pattern_: string
+    -split_seconds_: int
+    -segment_store_: RecordingSegmentStore*
+    -pipeline_: GstElement*
+    -record branch elements: GstElement*
+    -appsink branch elements: GstElement*
+    +create(): bool
+    +start(): bool
+    +poll_bus(timeout_ms): CameraPipelineEvent
+    +stop(): void
+    -finalize_recording(timeout_ms): bool
+    -handle_element_message(msg): void
+  }
+}
+
+package "Segment State" #FFF3E0 {
+  class RecordingSegment <<struct>> {
+    +profile_id: int64
+    +camera_id: string
+    +file_path: string
+    +started_at: time_point
+    +ended_at: optional<time_point>
+    +status: string
+  }
+
+  class RecordingSegmentStore {
+    -segments_: vector<RecordingSegment>
+    -change_callback_: SegmentChangeCallback
+    +set_change_callback(callback): void
+    +on_segment_started(profile_id, camera_id, file_path): void
+    +on_segment_finished(camera_id, file_path): void
+    +mark_open_segments_interrupted(camera_id): void
+    +find_segments_by_time_range(camera_id, from, to): vector<RecordingSegment>
+  }
+}
+
+package "RTSP Relay" #FCE4EC {
+  class RtspRelayServer {
+    -service_: string
+    -bind_address_: string
+    -advertised_host_: string
+    -enabled_: bool
+    -server_: GstRTSPServer*
+    -main_loop_: GMainLoop*
+    -server_thread_: thread
+    -running_: bool
+    -mounted_sources_: map<string, string>
+    +add_h264_camera(config): bool
+    +start(): bool
+    +stop(): void
+    +make_mount_path(camera_id): string
+    +make_public_url(camera_id): string
+    +is_enabled(): bool
+  }
+
+  class RelayFactoryLogContext <<private struct>> {
+    +camera_id: string
+    +mount_path: string
+    +input_uri: string
+    +output_url: string
+  }
+}
+
+package "External Runtime" #F3E5F5 {
+  class GStreamer <<external>>
+  class GstRTSPServer <<external>>
+  class GstRTSPMediaFactory <<external>>
+  class GMainLoop <<external>>
+  class Thread <<standard library>>
+}
+
+CameraManager ..> CameraConfig : validates / consumes
+CameraManager *-- "0..*" CameraWorker : workers_
+CameraManager *-- RecordingSegmentStore : segment_store_
+CameraWorker --> RecordingSegmentStore : non-owning pointer
+CameraWorker *-- Thread : worker_thread_
+CameraWorker ..> CameraPipeline : stack object per retry
+CameraPipeline --> RecordingSegmentStore : segment lifecycle calls
+CameraPipeline ..> CameraPipelineEvent : poll_bus result
+CameraPipeline *-- GStreamer : owns pipeline elements
+
+RecordingSegmentStore *-- "0..*" RecordingSegment : segments_
+RecordingSegmentStore ..> RecordingSegment : callback payload
+
+RtspRelayServer ..> CameraConfig : consumes camera_id / rtsp_uri
+RtspRelayServer *-- GstRTSPServer : server_
+RtspRelayServer *-- GMainLoop : main_loop_
+RtspRelayServer *-- Thread : server_thread_
+RtspRelayServer ..> GstRTSPMediaFactory : creates per mount
+GstRTSPMediaFactory *-- RelayFactoryLogContext : signal context
+RtspRelayServer ..> GStreamer
+
+note bottom of CameraWorker
+  run() reconnects indefinitely until stop is requested.
+  Every attempt creates a fresh CameraPipeline and a unique
+  recording filename prefix, then polls for ERROR or EOS.
+end note
+
+note bottom of CameraPipeline
+  rtspsrc -> rtph264depay -> h264parse -> tee
+
+  recording: queue -> splitmuxsink (MP4 fragments)
+  sampling:  queue -> decode -> convert/scale -> RGB appsink
+
+  splitmuxsink callbacks open/close RecordingSegment records.
+  Failed EOS finalization marks open records as interrupted.
+end note
+
+note bottom of RtspRelayServer
+  Each /live/{camera_id} mount owns a shared RTSP media factory.
+  Its relay pipeline opens a separate upstream RTSP connection;
+  it is independent from the recording CameraPipeline.
+end note
+
+@enduml
+

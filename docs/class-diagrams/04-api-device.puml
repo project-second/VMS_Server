@@ -1,0 +1,208 @@
+@startuml
+title VMS Server - Device, Channel, PTZ, Preset, and Tour API
+
+!include _style.puml
+left to right direction
+
+package "HTTP Layer" #E3F2FD {
+  class VmsDeviceController {
+    -httpServer: HttpServer&
+    -deviceService: VmsDeviceService&
+    -handleGetDeviceList(): void
+    -handleChangeDeviceName(): void
+    -handleGetDeviceChannelList(): void
+    -handleChannelPanControl(): void
+    -handleChannelTiltControl(): void
+    -handleChannelLinearControl(): void
+    -handleChannelStopControl(): void
+    -handleGetChannelPresetList(): void
+    -handleSetChannelPreset(): void
+    -handleGoToChannelPreset(): void
+    -handleUpdateChannelPreset(): void
+    -handleDeleteChannelPreset(): void
+    -handleGetChannelTourList(): void
+    -handleCreateChannelTour(): void
+    -handleGetChannelTourInfo(): void
+    -handleStartChannelTour(): void
+    -handleStopChannelTour(): void
+    -handleUpdateChannelTourInfo(): void
+    -handleDeleteChannelTour(): void
+  }
+}
+
+package "Service Layer" #E8F5E9 {
+  class VmsDeviceService {
+    -deviceRepository: VmsDeviceRepository&
+    -ptzClient: OnvifPtzClient&
+    +getDeviceList(page, size): DeviceListResult
+    +changeDeviceName(deviceId, name): ChangeNameResult
+    +getDeviceChannelList(deviceId): ChannelListResult
+    +panChannel(channelId, speed): PtzControlResult
+    +tiltChannel(channelId, speed): PtzControlResult
+    +moveChannelLinear(channelId, pan, tilt, zoom): PtzControlResult
+    +stopChannel(channelId, panTilt, zoom): PtzControlResult
+    +getChannelPresetList(channelId): PresetListResult
+    +setChannelPreset(channelId, name): PtzControlResult
+    +goToChannelPreset(channelId, presetId): PtzControlResult
+    +updateChannelPreset(...): PtzControlResult
+    +deleteChannelPreset(...): PtzControlResult
+    +getChannelTourList(channelId): TourListResult
+    +getChannelTourInfo(channelId, tourId): TourDetailResult
+    +createChannelTour(channelId, request): TourMutationResult
+    +updateChannelTour(channelId, tourId, request): TourMutationResult
+    +startChannelTour(channelId, tourId): PtzControlResult
+    +stopChannelTour(channelId, tourId): PtzControlResult
+    +deleteChannelTour(channelId, tourId): PtzControlResult
+  }
+}
+
+package "Service DTOs" #F1F8E9 {
+  class "VmsDeviceService::DeviceItem" as DeviceItem <<DTO>> {
+    +deviceId: int64
+    +type: int64
+    +ip: string
+    +name: string
+    +model: string
+    +online: bool
+    +health: string
+    +channelCount: int64
+  }
+  class "VmsDeviceService::ChannelItem" as ChannelItem <<DTO>> {
+    +channelId: int64
+    +channelNo: int64
+    +name: string
+    +videoCodec: string
+    +audioCodec: string
+    +rtsp: string
+  }
+  class "VmsDeviceService::PresetItem" as PresetItem <<DTO>>
+  class "VmsDeviceService::TourItem" as TourItem <<DTO>>
+  class "VmsDeviceService::TourItemInput" as TourItemInput <<DTO>> {
+    +presetId: int64
+    +seqNo: int64
+    +staySeconds: int64
+    +moveSpeed: double
+  }
+  class "VmsDeviceService::TourWriteRequest" as TourWriteRequest <<DTO>> {
+    +tourName: string
+    +repeatMode: string
+    +isEnabled: bool
+  }
+  class "VmsDeviceService::TourItemResult" as TourItemResult <<DTO>> {
+    +tourId: int64
+    +tourToken: string
+    +tourName: string
+    +repeatMode: string
+    +isEnabled: bool
+    +itemCount: int64
+  }
+  class "VmsDeviceService::DeviceListResult" as DeviceListResult <<DTO>> {
+    +status: ListStatus
+    +page: int
+    +size: int
+  }
+  class "VmsDeviceService::ChannelListResult" as ChannelListResult <<DTO>>
+  class "VmsDeviceService::PresetListResult" as PresetListResult <<DTO>>
+  class "VmsDeviceService::TourListResult" as TourListResult <<DTO>>
+  class "VmsDeviceService::TourDetailResult" as TourDetailResult <<DTO>>
+  class "VmsDeviceService::TourMutationResult" as TourMutationResult <<DTO>>
+  class "VmsDeviceService::ChangeNameResult" as ChangeNameResult <<DTO>>
+  class "VmsDeviceService::PtzControlResult" as PtzControlResult <<DTO>>
+}
+
+package "Repository Layer" #FFF3E0 {
+  class VmsDeviceRepository {
+    +listDevices(limit, offset): vector<DeviceRecord>
+    +findDeviceById(deviceId): optional<DeviceRecord>
+    +updateDeviceName(deviceId, name): bool
+    +listDeviceChannels(deviceId): vector<ChannelRecord>
+    +findPtzTargetByChannelId(channelId): optional<PtzTargetRecord>
+    +listChannelPresets(channelId): vector<PresetRecord>
+    +findChannelPreset(channelId, presetId): optional<PresetRecord>
+    +upsertChannelPreset(...): bool
+    +updateChannelPresetName(...): bool
+    +deleteChannelPreset(...): bool
+    +listChannelTours(channelId): vector<TourRecord>
+    +findChannelTour(channelId, tourId): optional<TourRecord>
+    +upsertChannelTour(...): optional<TourRecord>
+    +listChannelTourItems(tourId): vector<TourItemRecord>
+    +replaceChannelTourItems(tourId, items): bool
+    +deleteChannelTour(channelId, tourId): bool
+  }
+
+  class "VmsDeviceRepository::DeviceRecord" as DeviceRecord <<record>>
+  class "VmsDeviceRepository::ChannelRecord" as ChannelRecord <<record>>
+  class "VmsDeviceRepository::PtzTargetRecord" as PtzTargetRecord <<record>> {
+    +channelId: int64
+    +deviceId: int64
+    +ptzXAddr: string
+    +profileToken: string
+    +username: string
+    +passwordEnc: string
+    +supportsPan: bool
+    +supportsTilt: bool
+    +supportsZoom: bool
+    +supportsTour: bool
+    +supportsLinear: bool
+  }
+  class "VmsDeviceRepository::PresetRecord" as PresetRecord <<record>>
+  class "VmsDeviceRepository::TourRecord" as TourRecord <<record>>
+  class "VmsDeviceRepository::TourItemRecord" as TourItemRecord <<record>>
+}
+
+package "Library Boundaries" #F3E5F5 {
+  class HttpServer <<lib boundary>>
+  class AppDb <<lib boundary>>
+  class OnvifPtzClient <<lib boundary>>
+  class SecretCodec <<lib boundary>>
+}
+
+VmsDeviceController --> HttpServer : registers routes
+VmsDeviceController --> VmsDeviceService
+VmsDeviceService --> VmsDeviceRepository
+VmsDeviceRepository ..> AppDb : mapper queries
+VmsDeviceService --> OnvifPtzClient : stored reference
+VmsDeviceService ..> OnvifPtzClient : creates per-target client
+VmsDeviceService ..> SecretCodec : decrypts device password
+VmsDeviceService ..> PtzTargetRecord : resolves ONVIF target
+
+VmsDeviceRepository ..> DeviceRecord : returns
+VmsDeviceRepository ..> ChannelRecord : returns
+VmsDeviceRepository ..> PtzTargetRecord : returns
+VmsDeviceRepository ..> PresetRecord : returns
+VmsDeviceRepository ..> TourRecord : returns
+VmsDeviceRepository ..> TourItemRecord : returns
+
+DeviceRecord ..> DeviceItem : mapped to
+ChannelRecord ..> ChannelItem : mapped to
+PresetRecord ..> PresetItem : mapped to
+TourRecord ..> TourItemResult : mapped to
+TourItemRecord ..> TourItem : mapped to
+
+DeviceListResult o-- "0..*" DeviceItem : items
+ChannelListResult o-- "0..*" ChannelItem : items
+PresetListResult o-- "0..*" PresetItem : items
+TourWriteRequest o-- "0..*" TourItemInput : items
+TourItemResult o-- "0..*" TourItem : items
+TourListResult o-- "0..*" TourItemResult : items
+TourDetailResult o-- "0..1" TourItemResult : item
+TourMutationResult o-- "0..1" TourItemResult : item
+
+VmsDeviceService ..> DeviceListResult : returns
+VmsDeviceService ..> ChannelListResult : returns
+VmsDeviceService ..> PresetListResult : returns
+VmsDeviceService ..> TourListResult : returns
+VmsDeviceService ..> TourDetailResult : returns
+VmsDeviceService ..> TourMutationResult : returns
+VmsDeviceService ..> ChangeNameResult : returns
+VmsDeviceService ..> PtzControlResult : returns
+
+note bottom of VmsDeviceService
+  Status enums declared inside the service:
+  ListStatus, MutationStatus, PtzControlStatus.
+
+  The ptzClient reference is retained, but current commands
+  build a client from each PtzTargetRecord's credentials.
+end note
+
+@enduml

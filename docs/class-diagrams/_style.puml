@@ -1,0 +1,20 @@
+' Shared rendering style for VMS_Server class diagrams.
+skinparam backgroundColor #FFFFFF
+skinparam shadowing false
+skinparam roundCorner 8
+skinparam classAttributeIconSize 0
+skinparam packageStyle rectangle
+skinparam linetype ortho
+skinparam ArrowColor #455A64
+skinparam ClassBorderColor #455A64
+skinparam ClassBackgroundColor #FAFAFA
+skinparam ClassFontColor #263238
+skinparam PackageBorderColor #78909C
+skinparam PackageBackgroundColor #F5F7F8
+skinparam NoteBorderColor #90A4AE
+skinparam NoteBackgroundColor #FFFDE7
+skinparam LegendBorderColor #B0BEC5
+skinparam LegendBackgroundColor #FFFFFF
+
+hide circle
+

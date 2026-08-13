@@ -1,0 +1,125 @@
+@startuml
+title VMS Server - ONVIF Provisioning and Media Registration
+
+!include _style.puml
+left to right direction
+
+package "ONVIF Coordination" #E3F2FD {
+  class OnvifDeviceProvisioningService {
+    -threadPool: ThreadPool&
+    -discoveryService: OnvifDiscoveryService
+    -deviceClients: vector<unique_ptr<OnvifDeviceClient>>
+    -repository: OnvifProvisioningRepository
+    -mediaService: MediaService
+    -provisioningThread: thread
+    -running: atomic<bool>
+    +start(): void
+    +stop(): void
+    +provisioningLoop(): void
+  }
+
+  class OnvifProvisioningRepository {
+    +ensureChannel(result): optional<int64>
+    +updateChannelServiceRtspUrl(channelId, url): bool
+    +upsertProfiles(channelId, result): bool
+    +findProfileId(channelId, profileToken): optional<int64>
+    -upsertDevice(result): optional<int64>
+    -upsertChannel(deviceId, result): optional<int64>
+  }
+}
+
+package "Provisioning DTOs" #E8F5E9 {
+  class OnvifProvisionedProfile <<struct>> {
+    +profile: OnvifMediaProfile
+    +streamUri: optional<OnvifStreamUri>
+  }
+
+  class ProvisioningResult <<struct>> {
+    +discoveredDevice: OnvifDiscoveredDevice
+    +deviceServiceUrl: string
+    +mediaServiceUrl: string
+    +deviceInformation: OnvifDeviceInformation
+    +capabilities: OnvifDeviceCapabilities
+    +profiles: vector<OnvifProvisionedProfile>
+  }
+}
+
+package "Project Media Adapter" #FFF3E0 {
+  class MediaRecordingOptions <<struct>> {
+    +recordRootDir: string
+    +splitSeconds: int
+  }
+
+  class MediaService {
+    -cameraManager: CameraManager&
+    -relayServer: RtspRelayServer&
+    -repository: OnvifProvisioningRepository&
+    -registeredCameraIds_: unordered_set<string>
+    -recordingOptions_: MediaRecordingOptions
+    +addCamera(results: vector<ProvisioningResult>): void
+  }
+}
+
+package "ONVIF Library Boundaries" #F3E5F5 {
+  class ThreadPool <<lib boundary>>
+  class OnvifDiscoveryService <<lib boundary>>
+  class OnvifDeviceClient <<lib boundary>>
+  class OnvifMediaClient <<lib boundary>>
+  class OnvifDiscoveredDevice <<lib boundary>>
+  class OnvifDeviceInformation <<lib boundary>>
+  class OnvifDeviceCapabilities <<lib boundary>>
+  class OnvifMediaProfile <<lib boundary>>
+  class OnvifStreamUri <<lib boundary>>
+}
+
+package "Media / DB Library Boundaries" #F3E5F5 {
+  class AppDb <<lib boundary>>
+  class CameraManager <<lib boundary>>
+  class CameraConfig <<lib boundary>>
+  class RtspRelayServer <<lib boundary>>
+}
+
+OnvifDeviceProvisioningService --> ThreadPool : submits per-device tasks
+OnvifDeviceProvisioningService *-- OnvifDiscoveryService
+OnvifDeviceProvisioningService *-- "0..*" OnvifDeviceClient : deviceClients
+OnvifDeviceProvisioningService ..> OnvifDeviceClient : task-local calls
+OnvifDeviceProvisioningService ..> OnvifMediaClient : task-local calls
+OnvifDeviceProvisioningService *-- OnvifProvisioningRepository
+OnvifDeviceProvisioningService *-- MediaService
+OnvifDeviceProvisioningService ..> ProvisioningResult : creates
+
+ProvisioningResult *-- OnvifDiscoveredDevice
+ProvisioningResult *-- OnvifDeviceInformation
+ProvisioningResult *-- OnvifDeviceCapabilities
+ProvisioningResult *-- "0..*" OnvifProvisionedProfile : profiles
+OnvifProvisionedProfile *-- OnvifMediaProfile
+OnvifProvisionedProfile o-- "0..1" OnvifStreamUri
+
+OnvifProvisioningRepository ..> ProvisioningResult : consumes
+OnvifProvisioningRepository ..> AppDb : mapper queries
+
+MediaService --> CameraManager
+MediaService --> RtspRelayServer
+MediaService --> OnvifProvisioningRepository
+MediaService *-- MediaRecordingOptions
+MediaService ..> ProvisioningResult : consumes
+MediaService ..> CameraConfig : creates
+
+note bottom of OnvifDeviceProvisioningService
+  Devices are provisioned in parallel through ThreadPool.
+  Calls for one device remain sequential because capabilities,
+  profiles, and stream URIs depend on earlier results.
+
+  deviceClients is declared as owned state, but the current loop
+  uses task-local OnvifDeviceClient and OnvifMediaClient instances.
+end note
+
+note bottom of MediaService
+  For each provisioned profile, MediaService:
+  1. upserts device/channel/profile rows,
+  2. builds CameraConfig and recording path,
+  3. registers RTSP relay and CameraManager,
+  4. writes the public relay URL back to the channel.
+end note
+
+@enduml

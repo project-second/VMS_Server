@@ -1,0 +1,92 @@
+@startuml
+title app-media-server - Library Overview
+
+!include _style.puml
+left to right direction
+
+package "Project Consumers (src/include)" #E3F2FD {
+  class VmsApplication <<src consumer>>
+  class MediaService <<src consumer>>
+  class VmsPlaybackService <<src consumer>>
+}
+
+package "Recording and RTSP Relay" #E8F5E9 {
+  class CameraConfig <<struct>>
+  class CameraManager
+  class CameraWorker
+  class CameraPipeline
+  enum CameraPipelineEvent
+  class RecordingSegmentStore
+  class RecordingSegment <<struct>>
+  class RtspRelayServer
+}
+
+package "Playback and HLS VOD" #FFF3E0 {
+  class PlaybackService
+  class PlaybackSession <<struct>>
+  class HlsVodSessionManager
+  class HlsVodSession <<struct>>
+  class HlsVodConverter
+  class HlsVodPlaylistBuilder
+}
+
+package "Runtime Dependencies" #F3E5F5 {
+  class GStreamer <<external>>
+  class GStreamerRTSPServer <<external>>
+  class Threads <<external>>
+  class Filesystem <<standard library>>
+}
+
+MediaService ..> CameraConfig : creates
+MediaService --> CameraManager : registers recordings
+MediaService --> RtspRelayServer : registers relay mounts
+VmsApplication ..> RecordingSegmentStore : installs persistence callback
+
+CameraManager *-- "0..*" CameraWorker : workers_
+CameraManager *-- RecordingSegmentStore : segment_store_
+CameraManager ..> CameraConfig : consumes
+CameraWorker --> RecordingSegmentStore : non-owning pointer
+CameraWorker ..> CameraPipeline : creates per connection attempt
+CameraPipeline --> RecordingSegmentStore : start / finish events
+CameraPipeline ..> CameraPipelineEvent : returns
+RecordingSegmentStore *-- "0..*" RecordingSegment : in-memory segments
+RtspRelayServer ..> CameraConfig : consumes
+
+PlaybackService --> RecordingSegmentStore : optional segment source
+PlaybackService ..> PlaybackSession : creates
+HlsVodSessionManager ..> PlaybackSession : maps
+HlsVodSessionManager ..> HlsVodSession : creates cache plan
+HlsVodConverter ..> HlsVodSession : MP4 to MPEG-TS
+HlsVodPlaylistBuilder ..> HlsVodSession : writes index.m3u8
+
+VmsPlaybackService *-- PlaybackService
+VmsPlaybackService *-- HlsVodSessionManager
+VmsPlaybackService *-- HlsVodConverter
+VmsPlaybackService *-- HlsVodPlaylistBuilder
+
+CameraWorker ..> Threads
+RtspRelayServer ..> Threads
+CameraPipeline ..> GStreamer
+HlsVodConverter ..> GStreamer
+RtspRelayServer ..> GStreamerRTSPServer
+HlsVodSessionManager ..> Filesystem
+HlsVodPlaylistBuilder ..> Filesystem
+
+note bottom of CameraPipeline
+  One upstream RTSP stream is split into:
+  - splitmuxsink recording branch
+  - decoded RGB appsink branch
+end note
+
+note bottom of RtspRelayServer
+  Relay uses its own rtspsrc pipeline.
+  It does not share CameraPipeline's upstream connection.
+end note
+
+note bottom of PlaybackService
+  PlaybackService can read RecordingSegmentStore directly,
+  or receive a caller-supplied vector<RecordingSegment>.
+end note
+
+@enduml
+

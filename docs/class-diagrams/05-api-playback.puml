@@ -1,0 +1,140 @@
+@startuml
+title VMS Server - Recording Segment and HLS Playback API
+
+!include _style.puml
+left to right direction
+
+package "HTTP Layer" #E3F2FD {
+  class VmsPlaybackController {
+    -httpServer_: HttpServer&
+    -service_: VmsPlaybackService&
+    -handleGetSegmentList(): void
+    -handleGetTimelineList(): void
+    -handleStreamTimeRange(): void
+    -handleGetSegment(): void
+    -handleHlsSegment(): void
+  }
+}
+
+package "Playback Application Service" #E8F5E9 {
+  class VmsPlaybackService {
+    -repository_: VmsPlaybackRepository&
+    -sessions_: map<string, AuthorizedHlsSession>
+    -sessionTtl_: minutes
+    +findTarget(deviceId, channelId): optional<PlaybackTargetRecord>
+    +findPage(profileId, page, size): PlaybackSegmentPage
+    +findRange(profileId, fromMs, toMs): vector<PlaybackSegmentRecord>
+    +findSegment(segmentId): optional<PlaybackSegmentRecord>
+    +persistRecordingSegment(segment): bool
+    +interruptStaleRecordings(): bool
+    +createHls(target, fromMs, toMs): PlaybackHlsResult
+    +readHlsSegment(sessionId, fileName, token): PlaybackBinaryResult
+    -cleanupExpiredSessions(): void
+  }
+
+  class "VmsPlaybackService::AuthorizedHlsSession" as AuthorizedHlsSession <<private struct>> {
+    +session: HlsVodSession
+    +accessToken: string
+  }
+
+  class PlaybackHlsResult <<DTO>> {
+    +ok: bool
+    +notFound: bool
+    +errorMessage: string
+    +sessionId: string
+    +playlist: string
+  }
+
+  class PlaybackBinaryResult <<DTO>> {
+    +ok: bool
+    +unauthorized: bool
+    +errorMessage: string
+    +body: string
+  }
+}
+
+package "Playback Repository" #FFF3E0 {
+  class VmsPlaybackRepository {
+    +findTarget(deviceId, channelId): optional<PlaybackTargetRecord>
+    +findPage(profileId, limit, offset): PlaybackSegmentPage
+    +findRange(profileId, fromMs, toMs): vector<PlaybackSegmentRecord>
+    +findById(segmentId): optional<PlaybackSegmentRecord>
+    +saveStarted(profileId, filePath, startMs, codec): bool
+    +saveClosed(filePath, endMs, fileSize, codec, status): bool
+    +interruptStaleRecordings(): bool
+  }
+
+  class PlaybackTargetRecord <<record>> {
+    +deviceId: int64
+    +channelId: int64
+    +profileId: int64
+    +deviceName: string
+    +channelName: string
+  }
+
+  class PlaybackSegmentRecord <<record>> {
+    +segmentId: int64
+    +profileId: int64
+    +filePath: string
+    +startMs: int64
+    +endMs: optional<int64>
+    +fileSize: int64
+    +codec: string
+    +status: string
+    +hasGap: bool
+    +deviceId: int64
+    +channelId: int64
+  }
+
+  class PlaybackSegmentPage <<DTO>> {
+    +items: vector<PlaybackSegmentRecord>
+    +totalCount: int64
+  }
+}
+
+package "Media Library Boundaries" #F3E5F5 {
+  class HttpServer <<lib boundary>>
+  class AppDb <<lib boundary>>
+  class RecordingSegmentStore <<lib boundary>>
+  class RecordingSegment <<lib boundary>>
+  class PlaybackService <<lib boundary>>
+  class HlsVodSessionManager <<lib boundary>>
+  class HlsVodSession <<lib boundary>>
+  class HlsVodConverter <<lib boundary>>
+  class HlsVodPlaylistBuilder <<lib boundary>>
+}
+
+VmsPlaybackController --> HttpServer : registers routes
+VmsPlaybackController --> VmsPlaybackService
+
+VmsPlaybackService --> VmsPlaybackRepository
+VmsPlaybackRepository ..> AppDb : mapper queries
+VmsPlaybackRepository ..> PlaybackTargetRecord : returns
+VmsPlaybackRepository ..> PlaybackSegmentRecord : returns
+VmsPlaybackRepository ..> PlaybackSegmentPage : returns
+PlaybackSegmentPage o-- "0..*" PlaybackSegmentRecord : items
+
+VmsPlaybackService *-- PlaybackService : playbackService_
+VmsPlaybackService *-- HlsVodSessionManager : sessionManager_
+VmsPlaybackService *-- HlsVodConverter : converter_
+VmsPlaybackService *-- HlsVodPlaylistBuilder : playlistBuilder_
+VmsPlaybackService *-- "0..*" AuthorizedHlsSession : sessions_
+AuthorizedHlsSession *-- HlsVodSession
+
+VmsPlaybackService ..> PlaybackTargetRecord : consumes / returns
+VmsPlaybackService ..> PlaybackSegmentRecord : returns
+VmsPlaybackService ..> PlaybackSegmentPage : returns
+VmsPlaybackService ..> RecordingSegment : persists callback data
+VmsPlaybackService ..> PlaybackHlsResult : returns
+VmsPlaybackService ..> PlaybackBinaryResult : returns
+
+RecordingSegmentStore ..> VmsPlaybackService : change callback configured by VmsApplication
+
+note bottom of VmsPlaybackService
+  createHls() selects DB segments, creates a playback session,
+  converts it to HLS, rewrites playlist segment URLs with a
+  per-session token, and retains AuthorizedHlsSession for 15 minutes.
+end note
+
+@enduml
+

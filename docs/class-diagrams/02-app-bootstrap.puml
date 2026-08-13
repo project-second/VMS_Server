@@ -1,0 +1,123 @@
+@startuml
+title VMS Server - Application Bootstrap and Configuration
+
+!include _style.puml
+left to right direction
+
+package "Entry Point" #E3F2FD {
+  class "main.cpp" as Main <<source module>> {
+    +main(argc: int, argv: char**): int
+  }
+
+  class VmsApplication {
+    +run(argc: int, argv: char**): int
+  }
+}
+
+package "Configuration" #E8F5E9 {
+  class AppRuntimeConfig <<struct>> {
+    +dbConninfo: string
+    +dbMapperPath: string
+    +serverHost: string
+    +serverPort: int
+    +serverThreads: int
+    +clientPoolThreads: int
+    +clientPoolMaxQueue: int
+    +onvifDiscoveryIntervalMs: int
+    +onvifSoapLogEnabled: bool
+    +onvifSoapLogDir: string
+    +mediaRecordingRootDir: string
+    +mediaRecordingSplitSeconds: int
+    +mediaRtspRelayEnabled: bool
+    +mediaRtspRelayBindAddress: string
+    +mediaRtspRelayPort: int
+    +mediaRtspRelayAdvertisedHost: string
+    +mediaMtxPlaybackSyncIntervalMs: int
+  }
+
+  class "ApplicationConfigLoader" as ConfigLoader <<source module>> {
+    +loadApplicationConfig(config, directory, file): bool
+  }
+
+  class Binding <<private struct>> {
+    +path: const char*
+    +required: bool
+    +defaultValue: const char*
+    +stringMember: pointer-to-member
+    +intMember: pointer-to-member
+  }
+}
+
+package "Runtime Paths" #FFF3E0 {
+  class VmsRuntimePaths <<struct>> {
+    +executableDirectory: filesystem::path
+    +resourceDirectory: filesystem::path
+  }
+
+  class "VmsRuntimePaths API" as RuntimePathsApi <<source module>> {
+    +resolveRuntimePaths(argv0): VmsRuntimePaths
+    +normalizeRuntimeConfigPaths(config, paths): void
+    +configurePackagedGStreamerEnvironment(paths): void
+  }
+}
+
+package "CLI Bootstrap" #FCE4EC {
+  class "VmsCreateAdminCommand" as CreateAdminCommand <<source module>> {
+    +printVmsUsage(program): void
+    +runCreateAdminCommand(argc, argv, config): int
+  }
+
+  class VmsAdminBootstrap {
+    +createAdmin(loginId, name, password): Status
+  }
+
+  enum "VmsAdminBootstrap::Status" as AdminBootstrapStatus {
+    Created
+    AdminAlreadyExists
+    LoginIdAlreadyExists
+    AdminRoleMissing
+    InternalError
+  }
+}
+
+package "Runtime Boundaries" #F3E5F5 {
+  class AppDb <<lib boundary>>
+  class HttpServer <<lib boundary>>
+  class OnvifSoapContext <<lib boundary>>
+  class GStreamer <<external>>
+  class SecurityUtils <<lib boundary>>
+}
+
+Main ..> VmsApplication : creates and runs
+VmsApplication ..> ConfigLoader : calls
+ConfigLoader ..> AppRuntimeConfig : fills
+ConfigLoader *-- Binding : static binding table
+
+VmsApplication ..> RuntimePathsApi : calls
+RuntimePathsApi ..> VmsRuntimePaths : creates / consumes
+RuntimePathsApi ..> AppRuntimeConfig : normalizes paths
+
+VmsApplication ..> CreateAdminCommand : CLI branch
+CreateAdminCommand ..> AppRuntimeConfig : consumes
+CreateAdminCommand ..> VmsAdminBootstrap : creates
+VmsAdminBootstrap ..> AdminBootstrapStatus : returns
+VmsAdminBootstrap ..> AppDb : advisory-lock transaction
+VmsAdminBootstrap ..> SecurityUtils : hashes password
+
+VmsApplication ..> AppDb : configures
+VmsApplication ..> HttpServer : creates / starts
+VmsApplication ..> OnvifSoapContext : configures logging
+VmsApplication ..> GStreamer : configures / initializes
+
+note bottom of VmsApplication
+  Repositories, services, controllers, media and ONVIF
+  coordinators are local variables in run(). Their detailed
+  wiring is shown in 01-overview.puml.
+end note
+
+legend bottom
+  <<source module>> groups C++ free functions; it is not a runtime class.
+endlegend
+
+@enduml
+

@@ -1,0 +1,120 @@
+@startuml
+title VMS Server - Project Class Overview (src + include)
+
+!include _style.puml
+left to right direction
+
+package "Application / Bootstrap" #E3F2FD {
+  class VmsApplication {
+    +run(argc: int, argv: char**): int
+  }
+  class VmsAuthMiddleware {
+    +operator()(req: Http::Request): optional<Http::Response>
+  }
+}
+
+package "HTTP API" #E8F5E9 {
+  class VmsUserController
+  class VmsAdminController
+  class VmsDeviceController
+  class VmsPlaybackController
+  class VmsEventController {
+    +handleGetEventList(): void
+    +handleGetEventDetails(): void
+    +handleEventSubscription(): void
+  }
+
+  class VmsUserService
+  class VmsAdminService
+  class VmsDeviceService
+  class VmsPlaybackService
+
+  class VmsUserRepository
+  class VmsAdminRepository
+  class VmsDeviceRepository
+  class VmsPlaybackRepository
+}
+
+package "ONVIF / Media Coordination" #FFF3E0 {
+  class OnvifDeviceProvisioningService
+  class OnvifProvisioningRepository
+  class MediaService
+}
+
+package "Library Boundaries (lib)" #F3E5F5 {
+  class HttpServer <<lib boundary>>
+  class AppDb <<lib boundary>>
+  class ThreadPool <<lib boundary>>
+  class OnvifDiscoveryService <<lib boundary>>
+  class OnvifPtzClient <<lib boundary>>
+  class CameraManager <<lib boundary>>
+  class RtspRelayServer <<lib boundary>>
+  class RecordingSegmentStore <<lib boundary>>
+  class PlaybackService <<lib boundary>>
+  class HlsVodSessionManager <<lib boundary>>
+}
+
+VmsApplication ..> HttpServer : creates / starts
+VmsApplication ..> VmsAuthMiddleware : wires
+VmsApplication ..> VmsUserController : creates
+VmsApplication ..> VmsAdminController : creates
+VmsApplication ..> VmsDeviceController : creates
+VmsApplication ..> VmsPlaybackController : creates
+VmsApplication ..> OnvifDeviceProvisioningService : creates / starts
+VmsApplication ..> CameraManager : creates / starts
+VmsApplication ..> RtspRelayServer : creates / starts
+VmsApplication ..> ThreadPool : creates
+
+VmsAuthMiddleware --> VmsUserService : validates token
+VmsAuthMiddleware --> VmsAdminService : checks admin
+
+VmsUserController --> HttpServer : registers routes
+VmsAdminController --> HttpServer : registers routes
+VmsDeviceController --> HttpServer : registers routes
+VmsPlaybackController --> HttpServer : registers routes
+VmsEventController --> HttpServer : registers routes
+
+VmsUserController --> VmsUserService
+VmsAdminController --> VmsAdminService
+VmsDeviceController --> VmsDeviceService
+VmsPlaybackController --> VmsPlaybackService
+
+VmsUserService --> VmsUserRepository
+VmsAdminService --> VmsAdminRepository
+VmsDeviceService --> VmsDeviceRepository
+VmsDeviceService --> OnvifPtzClient : stored ref / per-target use
+VmsPlaybackService --> VmsPlaybackRepository
+VmsPlaybackService *-- PlaybackService
+VmsPlaybackService *-- HlsVodSessionManager
+
+VmsUserRepository ..> AppDb
+VmsAdminRepository ..> AppDb
+VmsDeviceRepository ..> AppDb
+VmsPlaybackRepository ..> AppDb
+OnvifProvisioningRepository ..> AppDb
+
+OnvifDeviceProvisioningService *-- OnvifDiscoveryService
+OnvifDeviceProvisioningService *-- OnvifProvisioningRepository
+OnvifDeviceProvisioningService *-- MediaService
+OnvifDeviceProvisioningService --> ThreadPool
+MediaService --> OnvifProvisioningRepository
+MediaService --> CameraManager
+MediaService --> RtspRelayServer
+
+CameraManager *-- RecordingSegmentStore
+RecordingSegmentStore ..> VmsPlaybackService : change callback
+
+note right of VmsEventController
+  Implemented, but not currently
+  constructed by VmsApplication.
+end note
+
+legend bottom
+  |= Relation |= Meaning |
+  | *-- | owned value / composition |
+  | --> | stored reference / association |
+  | ..> | creates, calls, or transient dependency |
+  | <<lib boundary>> | lib implementation intentionally omitted |
+endlegend
+
+@enduml

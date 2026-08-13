@@ -1,0 +1,210 @@
+@startuml
+title app-media-server - Playback Session and HLS VOD
+
+!include _style.puml
+left to right direction
+
+package "Playback Service" #E3F2FD {
+  class PlaybackService {
+    -segment_store_: const RecordingSegmentStore*
+    +create_session(request): PlaybackResponse
+    +create_session(request, segments): PlaybackResponse
+    +seek(session, request): PlaybackSeekResult
+    -validate_request(request): PlaybackResponse
+    -make_entry_from_segment(segment, request): optional<PlaybackEntry>
+  }
+
+  class HlsVodSessionManager {
+    -cache_root_: filesystem::path
+    +create_session(playback_session): HlsVodSessionCreateResult
+    +cache_root(): const filesystem::path&
+    -make_segment(entry, sequence_no, cache_dir): HlsVodSegment
+    -write_debug_manifest(session, error): bool
+  }
+
+  class HlsVodConverter {
+    +convert_first_segment(session): HlsVodConvertResult
+    +convert_all_segments(session): HlsVodConvertAllResult
+    +convert_segment_to_ts(segment): HlsVodConvertResult
+    -validate_segment(segment): HlsVodConvertResult
+  }
+
+  class HlsVodPlaylistBuilder {
+    +write_playlist(session): HlsVodPlaylistWriteResult
+    -validate_session(session): HlsVodPlaylistWriteResult
+    -calculate_target_duration_seconds(session): int64
+  }
+}
+
+package "Recording Input" #FFF3E0 {
+  class RecordingSegmentStore {
+    +find_segments_by_time_range(camera_id, from, to): vector<RecordingSegment>
+  }
+  class RecordingSegment <<struct>>
+}
+
+package "Playback Data" #E8F5E9 {
+  class PlaybackRequest <<struct>> {
+    +camera_id: string
+    +from: time_point
+    +to: time_point
+  }
+
+  class PlaybackEntry <<struct>> {
+    +file_path: string
+    +segment_started_at: time_point
+    +segment_ended_at: time_point
+    +play_from: time_point
+    +play_to: time_point
+    +play_from_offset_ms: int64
+    +play_duration_ms: int64
+    +source_status: string
+  }
+
+  class PlaybackSession <<struct>> {
+    +session_id: string
+    +camera_id: string
+    +requested_from: time_point
+    +requested_to: time_point
+    +created_at: time_point
+    +total_duration_ms: int64
+  }
+
+  class PlaybackResponse <<struct>> {
+    +ok: bool
+    +error_message: string
+    +session: optional<PlaybackSession>
+  }
+
+  class PlaybackSeekRequest <<struct>> {
+    +session_id: string
+    +seek_time: time_point
+  }
+
+  class PlaybackSeekResult <<struct>> {
+    +ok: bool
+    +error_message: string
+    +entry_index: size_t
+    +file_path: string
+    +file_offset_ms: int64
+    +absolute_timeline_offset_ms: int64
+    +session_playback_offset_ms: int64
+    +remaining_duration_ms: int64
+  }
+}
+
+package "HLS VOD Data" #F1F8E9 {
+  class HlsVodSegment <<struct>> {
+    +sequence_no: size_t
+    +source_file_path: string
+    +source_offset_ms: int64
+    +duration_ms: int64
+    +program_date_time: time_point
+    +output_file_name: string
+    +output_file_path: filesystem::path
+  }
+
+  class HlsVodSession <<struct>> {
+    +session_id: string
+    +camera_id: string
+    +cache_dir: filesystem::path
+    +playlist_path: filesystem::path
+    +total_duration_ms: int64
+  }
+
+  class HlsVodSessionCreateResult <<struct>> {
+    +ok: bool
+    +error_message: string
+    +session: optional<HlsVodSession>
+  }
+
+  class HlsVodConvertResult <<struct>> {
+    +ok: bool
+    +error_message: string
+    +sequence_no: size_t
+    +source_file_path: path
+    +output_file_path: path
+    +source_offset_ms: int64
+    +requested_duration_ms: int64
+    +trim_applied: bool
+    +key_unit_seek: bool
+  }
+
+  class HlsVodConvertAllResult <<struct>> {
+    +ok: bool
+    +error_message: string
+    +session_id: string
+    +requested_count: size_t
+    +success_count: size_t
+    +failure_count: size_t
+  }
+
+  class HlsVodPlaylistWriteResult <<struct>> {
+    +ok: bool
+    +error_message: string
+    +playlist_path: path
+    +segment_count: size_t
+    +target_duration_seconds: int64
+  }
+}
+
+package "Converter Runtime" #F3E5F5 {
+  class QtdemuxLinkContext <<private struct>> {
+    +queue: GstElement*
+    +linked: bool
+    +error_message: string
+  }
+  class GStreamer <<external>>
+  class Filesystem <<standard library>>
+}
+
+PlaybackService --> RecordingSegmentStore : optional source
+RecordingSegmentStore *-- "0..*" RecordingSegment
+PlaybackService ..> RecordingSegment : maps
+PlaybackService ..> PlaybackRequest : consumes
+PlaybackService ..> PlaybackResponse : returns
+PlaybackService ..> PlaybackSeekRequest : consumes
+PlaybackService ..> PlaybackSeekResult : returns
+PlaybackResponse o-- "0..1" PlaybackSession : session
+PlaybackSession *-- "1..*" PlaybackEntry : entries
+PlaybackSeekResult o-- "0..*" PlaybackEntry : remaining_entries
+
+HlsVodSessionManager ..> PlaybackSession : consumes
+HlsVodSessionManager ..> HlsVodSessionCreateResult : returns
+HlsVodSessionCreateResult o-- "0..1" HlsVodSession : session
+HlsVodSession *-- "1..*" HlsVodSegment : segments
+PlaybackEntry ..> HlsVodSegment : mapped to plan
+HlsVodSessionManager ..> Filesystem : cache directories / manifest
+
+HlsVodConverter ..> HlsVodSession : consumes
+HlsVodConverter ..> HlsVodSegment : converts
+HlsVodConverter ..> HlsVodConvertResult : returns
+HlsVodConverter ..> HlsVodConvertAllResult : returns
+HlsVodConvertAllResult o-- "0..*" HlsVodConvertResult : segment_results
+HlsVodConverter ..> QtdemuxLinkContext : dynamic pad callback state
+HlsVodConverter ..> GStreamer : key-unit seek and remux
+
+HlsVodPlaylistBuilder ..> HlsVodSession : consumes
+HlsVodPlaylistBuilder ..> HlsVodPlaylistWriteResult : returns
+HlsVodPlaylistBuilder ..> Filesystem : writes index.m3u8
+
+note bottom of PlaybackService
+  RecordingSegment -> PlaybackEntry uses the intersection of
+  the requested time range and the closed MP4 segment range.
+  Recording gaps remain gaps in the absolute CCTV timeline.
+end note
+
+note bottom of HlsVodConverter
+  filesrc -> qtdemux -> queue -> h264parse -> mpegtsmux -> filesink
+
+  The converter applies a KEY_UNIT seek and remuxes H264 MP4
+  into MPEG-TS without decode/re-encode. The actual start may
+  precede the requested offset by a keyframe boundary.
+end note
+
+note bottom of HlsVodPlaylistBuilder
+  Writes a VOD index.m3u8 with EXTINF and
+  EXT-X-PROGRAM-DATE-TIME entries for CCTV wall-clock mapping.
+end note
+
+@enduml
