@@ -1,5 +1,7 @@
 #include "CameraPipeline.h"
 
+#include "H264RelayHub.h"
+
 #include <iostream>
 #include <utility>
 
@@ -20,14 +22,16 @@ CameraPipeline::CameraPipeline(
     std::string rtsp_uri,
     std::string record_pattern,
     int split_seconds,
-    RecordingSegmentStore* segment_store
+    RecordingSegmentStore* segment_store,
+    H264RelayHub* relay_hub
 )
     : profile_id_(profile_id),
       camera_id_(std::move(camera_id)),
       rtsp_uri_(std::move(rtsp_uri)),
       record_pattern_(std::move(record_pattern)),
       split_seconds_(split_seconds),
-      segment_store_(segment_store) {}
+      segment_store_(segment_store),
+      relay_hub_(relay_hub) {}
 
 CameraPipeline::~CameraPipeline() {
     stop();
@@ -38,7 +42,7 @@ bool CameraPipeline::create() {
     stop();
 
     // 2. 파이프라인 생성
-    pipeline_ = gst_pipeline_new("camera-record-appsink-pipeline");
+    pipeline_ = gst_pipeline_new("camera-record-relay-feed-pipeline");
 
     if (pipeline_ == nullptr) {
         std::cerr << "Failed to create pipeline" << std::endl;
@@ -83,13 +87,15 @@ bool CameraPipeline::create() {
         this
     );
 
-    // 9. appsink 콜백 등록
-    g_signal_connect(
-        app_sink_,
-        "new-sample",
-        G_CALLBACK(&CameraPipeline::on_new_sample),
-        this
-    );
+    // 9. encoded H.264 relay appsink 콜백 등록
+    if (relay_sink_ != nullptr) {
+        g_signal_connect(
+            relay_sink_,
+            "new-sample",
+            G_CALLBACK(&CameraPipeline::on_new_sample),
+            this
+        );
+    }
 
     // 10. splitmuxsink 파일명 생성 콜백 등록
     g_signal_connect(
@@ -113,19 +119,17 @@ bool CameraPipeline::create_elements() {
     record_queue_ = gst_element_factory_make("queue", "record-queue");
     split_sink_ = gst_element_factory_make("splitmuxsink", "split-sink");
 
-    // 3. appsink branch Element 생성
-    app_queue_ = gst_element_factory_make("queue", "app-queue");
-    decoder_ = gst_element_factory_make("avdec_h264", "decoder");
-    converter_ = gst_element_factory_make("videoconvert", "converter");
-    videoscale_ = gst_element_factory_make("videoscale", "videoscale");
-    capsfilter_ = gst_element_factory_make("capsfilter", "capsfilter");
-    app_sink_ = gst_element_factory_make("appsink", "app-sink");
+    // 3. relay가 활성화된 경우 encoded H.264 appsink branch Element 생성
+    if (relay_hub_ != nullptr) {
+        relay_queue_ = gst_element_factory_make("queue", "relay-feed-queue");
+        relay_sink_ = gst_element_factory_make("appsink", "relay-h264-sink");
+    }
 
     // 4. Element 생성 확인
     if (source_ == nullptr || depay_ == nullptr || parser_ == nullptr ||
         tee_ == nullptr || record_queue_ == nullptr || split_sink_ == nullptr ||
-        app_queue_ == nullptr || decoder_ == nullptr || converter_ == nullptr ||
-        videoscale_ == nullptr || capsfilter_ == nullptr || app_sink_ == nullptr) {
+        (relay_hub_ != nullptr &&
+         (relay_queue_ == nullptr || relay_sink_ == nullptr))) {
         std::cerr << "Failed to create one or more GStreamer elements" << std::endl;
 
         unref_element_if_needed(source_);
@@ -134,12 +138,8 @@ bool CameraPipeline::create_elements() {
         unref_element_if_needed(tee_);
         unref_element_if_needed(record_queue_);
         unref_element_if_needed(split_sink_);
-        unref_element_if_needed(app_queue_);
-        unref_element_if_needed(decoder_);
-        unref_element_if_needed(converter_);
-        unref_element_if_needed(videoscale_);
-        unref_element_if_needed(capsfilter_);
-        unref_element_if_needed(app_sink_);
+        unref_element_if_needed(relay_queue_);
+        unref_element_if_needed(relay_sink_);
 
         return false;
     }
@@ -157,14 +157,17 @@ bool CameraPipeline::add_elements_to_pipeline() {
         tee_,
         record_queue_,
         split_sink_,
-        app_queue_,
-        decoder_,
-        converter_,
-        videoscale_,
-        capsfilter_,
-        app_sink_,
         nullptr
     );
+
+    if (relay_hub_ != nullptr) {
+        gst_bin_add_many(
+            GST_BIN(pipeline_),
+            relay_queue_,
+            relay_sink_,
+            nullptr
+        );
+    }
 
     return true;
 }
@@ -193,33 +196,26 @@ bool CameraPipeline::configure_elements() {
         nullptr
     );
 
-    // 4. appsink branch 출력 포맷 설정
-    GstCaps* caps = gst_caps_from_string(
-        "video/x-raw,format=RGB,width=640,height=360"
-    );
+    // 4. relay branch는 녹화를 막지 않도록 bounded/leaky queue를 사용한다.
+    if (relay_hub_ != nullptr) {
+        g_object_set(
+            relay_queue_,
+            "max-size-buffers", 60,
+            "max-size-bytes", 0,
+            "max-size-time", static_cast<guint64>(0),
+            "leaky", 2,
+            nullptr
+        );
 
-    if (caps == nullptr) {
-        std::cerr << "Failed to create caps" << std::endl;
-        return false;
+        g_object_set(
+            relay_sink_,
+            "emit-signals", TRUE,
+            "sync", FALSE,
+            "max-buffers", 1,
+            "drop", TRUE,
+            nullptr
+        );
     }
-
-    g_object_set(
-        capsfilter_,
-        "caps", caps,
-        nullptr
-    );
-
-    gst_caps_unref(caps);
-
-    // 5. appsink 설정
-    g_object_set(
-        app_sink_,
-        "emit-signals", TRUE,
-        "sync", FALSE,
-        "max-buffers", 1,
-        "drop", TRUE,
-        nullptr
-    );
 
     return true;
 }
@@ -237,18 +233,12 @@ bool CameraPipeline::link_static_elements() {
         return false;
     }
 
-    // 3. appsink branch 내부 연결
-    if (!gst_element_link_many(
-            app_queue_,
-            decoder_,
-            converter_,
-            videoscale_,
-            capsfilter_,
-            app_sink_,
-            nullptr
-        )) {
-        std::cerr << "Failed to link appsink branch" << std::endl;
-        return false;
+    // 3. encoded H.264 relay branch 내부 연결
+    if (relay_hub_ != nullptr) {
+        if (!gst_element_link(relay_queue_, relay_sink_)) {
+            std::cerr << "Failed to link H264 relay feed branch" << std::endl;
+            return false;
+        }
     }
 
     return true;
@@ -257,14 +247,19 @@ bool CameraPipeline::link_static_elements() {
 bool CameraPipeline::link_tee_branches() {
     // 1. tee request pad 생성
     tee_record_pad_ = gst_element_request_pad_simple(tee_, "src_%u");
-    tee_app_pad_ = gst_element_request_pad_simple(tee_, "src_%u");
+    if (relay_hub_ != nullptr) {
+        tee_relay_pad_ = gst_element_request_pad_simple(tee_, "src_%u");
+    }
 
     // 2. queue sink pad 가져오기
     record_queue_sink_pad_ = gst_element_get_static_pad(record_queue_, "sink");
-    app_queue_sink_pad_ = gst_element_get_static_pad(app_queue_, "sink");
+    if (relay_hub_ != nullptr) {
+        relay_queue_sink_pad_ = gst_element_get_static_pad(relay_queue_, "sink");
+    }
 
-    if (tee_record_pad_ == nullptr || tee_app_pad_ == nullptr ||
-        record_queue_sink_pad_ == nullptr || app_queue_sink_pad_ == nullptr) {
+    if (tee_record_pad_ == nullptr || record_queue_sink_pad_ == nullptr ||
+        (relay_hub_ != nullptr &&
+         (tee_relay_pad_ == nullptr || relay_queue_sink_pad_ == nullptr))) {
         std::cerr << "Failed to get tee or queue pads" << std::endl;
         return false;
     }
@@ -275,10 +270,12 @@ bool CameraPipeline::link_tee_branches() {
         return false;
     }
 
-    // 4. tee → appsink queue 연결
-    if (gst_pad_link(tee_app_pad_, app_queue_sink_pad_) != GST_PAD_LINK_OK) {
-        std::cerr << "Failed to link tee to appsink queue" << std::endl;
-        return false;
+    // 4. tee → encoded H.264 relay queue 연결
+    if (relay_hub_ != nullptr) {
+        if (gst_pad_link(tee_relay_pad_, relay_queue_sink_pad_) != GST_PAD_LINK_OK) {
+            std::cerr << "Failed to link tee to H264 relay queue" << std::endl;
+            return false;
+        }
     }
 
     return true;
@@ -367,6 +364,10 @@ CameraPipelineEvent CameraPipeline::poll_bus(int timeout_ms) {
 void CameraPipeline::stop() {
     // 1. 파이프라인 존재 여부 확인
     if (pipeline_ == nullptr) {
+        if (relay_hub_ != nullptr) {
+            relay_hub_->reset_source(camera_id_);
+        }
+
         source_ = nullptr;
         depay_ = nullptr;
         parser_ = nullptr;
@@ -375,26 +376,21 @@ void CameraPipeline::stop() {
         record_queue_ = nullptr;
         split_sink_ = nullptr;
 
-        app_queue_ = nullptr;
-        decoder_ = nullptr;
-        converter_ = nullptr;
-        videoscale_ = nullptr;
-        capsfilter_ = nullptr;
-        app_sink_ = nullptr;
+        relay_queue_ = nullptr;
+        relay_sink_ = nullptr;
 
         tee_record_pad_ = nullptr;
-        tee_app_pad_ = nullptr;
+        tee_relay_pad_ = nullptr;
         record_queue_sink_pad_ = nullptr;
-        app_queue_sink_pad_ = nullptr;
+        relay_queue_sink_pad_ = nullptr;
 
-        frame_count_ = 0;
         return;
     }
 
     // 2. EOS로 마지막 파일 마무리 시도
     bool finalized = finalize_recording(3000);
 
-    // 3. EOS로 마무리하지 못한 recording segmentr는 interrupted 처리
+    // 3. EOS로 마무리하지 못한 recording segment는 interrupted 처리
     if (!finalized && segment_store_ != nullptr) {
         segment_store_->mark_open_segments_interrupted(camera_id_);
     }
@@ -402,17 +398,17 @@ void CameraPipeline::stop() {
     // 4. 파이프라인 정지
     gst_element_set_state(pipeline_, GST_STATE_NULL);
 
-// 5. tee request pad 해제
+    // 5. tee request pad 해제
     if (tee_ != nullptr && tee_record_pad_ != nullptr) {
         gst_element_release_request_pad(tee_, tee_record_pad_);
         gst_object_unref(tee_record_pad_);
         tee_record_pad_ = nullptr;
     }
 
-    if (tee_ != nullptr && tee_app_pad_ != nullptr) {
-        gst_element_release_request_pad(tee_, tee_app_pad_);
-        gst_object_unref(tee_app_pad_);
-        tee_app_pad_ = nullptr;
+    if (tee_ != nullptr && tee_relay_pad_ != nullptr) {
+        gst_element_release_request_pad(tee_, tee_relay_pad_);
+        gst_object_unref(tee_relay_pad_);
+        tee_relay_pad_ = nullptr;
     }
 
     // 6. queue sink pad 참조 해제
@@ -421,9 +417,9 @@ void CameraPipeline::stop() {
         record_queue_sink_pad_ = nullptr;
     }
 
-    if (app_queue_sink_pad_ != nullptr) {
-        gst_object_unref(app_queue_sink_pad_);
-        app_queue_sink_pad_ = nullptr;
+    if (relay_queue_sink_pad_ != nullptr) {
+        gst_object_unref(relay_queue_sink_pad_);
+        relay_queue_sink_pad_ = nullptr;
     }
 
     // 7. 파이프라인 해제
@@ -439,14 +435,12 @@ void CameraPipeline::stop() {
     record_queue_ = nullptr;
     split_sink_ = nullptr;
 
-    app_queue_ = nullptr;
-    decoder_ = nullptr;
-    converter_ = nullptr;
-    videoscale_ = nullptr;
-    capsfilter_ = nullptr;
-    app_sink_ = nullptr;
+    relay_queue_ = nullptr;
+    relay_sink_ = nullptr;
 
-    frame_count_ = 0;
+    if (relay_hub_ != nullptr) {
+        relay_hub_->reset_source(camera_id_);
+    }
 }
 
 void CameraPipeline::on_pad_added(
@@ -542,58 +536,19 @@ void CameraPipeline::handle_pad_added(GstPad* new_pad) {
 }
 
 GstFlowReturn CameraPipeline::handle_new_sample(GstAppSink* appsink) {
-    // 1. appsink에서 sample 가져오기
+    // 1. encoded H.264 appsink에서 sample 가져오기
     GstSample* sample = gst_app_sink_pull_sample(appsink);
 
     if (sample == nullptr) {
         return GST_FLOW_ERROR;
     }
 
-    // 2. sample에서 caps / buffer 가져오기
-    GstCaps* caps = gst_sample_get_caps(sample);
-    GstBuffer* buffer = gst_sample_get_buffer(sample);
-
-    if (caps == nullptr || buffer == nullptr) {
-        gst_sample_unref(sample);
-        return GST_FLOW_ERROR;
+    // 2. relay pipeline이 없거나 잠시 중단돼도 recording 흐름은 유지한다.
+    if (relay_hub_ != nullptr) {
+        relay_hub_->publish_sample(camera_id_, sample);
     }
 
-    // 3. caps에서 영상 정보 가져오기
-    GstStructure* structure = gst_caps_get_structure(caps, 0);
-
-    gint width = 0;
-    gint height = 0;
-
-    const gchar* format = gst_structure_get_string(structure, "format");
-
-    gst_structure_get_int(structure, "width", &width);
-    gst_structure_get_int(structure, "height", &height);
-
-    // 4. buffer 메모리 매핑
-    GstMapInfo map_info;
-
-    if (!gst_buffer_map(buffer, &map_info, GST_MAP_READ)) {
-        gst_sample_unref(sample);
-        return GST_FLOW_ERROR;
-    }
-
-    // 5. 프레임 정보 출력
-    frame_count_++;
-
-    if (frame_count_ % 30 == 0) {
-        std::cout << "Frame " << frame_count_
-                  << " | format=" << (format ? format : "unknown")
-                  << " | width=" << width
-                  << " | height=" << height
-                  << " | size=" << map_info.size
-                  << " bytes"
-                  << std::endl;
-    }
-
-    // 6. buffer 메모리 해제
-    gst_buffer_unmap(buffer, &map_info);
-
-    // 7. sample 해제
+    // 3. sample 해제
     gst_sample_unref(sample);
 
     return GST_FLOW_OK;

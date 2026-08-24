@@ -8,6 +8,8 @@
 
 #include "RecordingSegmentStore.h"
 
+class H264RelayHub;
+
 class CameraWorker {
 private:
     std::int64_t profile_id_ = 0;
@@ -17,6 +19,7 @@ private:
     int split_seconds_ = 5;
 
     RecordingSegmentStore* segment_store_ = nullptr;
+    H264RelayHub* relay_hub_ = nullptr;
 
     std::atomic_bool stop_requested_{false};
     std::thread worker_thread_;
@@ -28,7 +31,8 @@ public:
         std::string rtsp_uri,
         std::string record_pattern,
         int split_seconds,
-        RecordingSegmentStore* segment_store
+        RecordingSegmentStore* segment_store,
+        H264RelayHub* relay_hub
     );
 
     ~CameraWorker();

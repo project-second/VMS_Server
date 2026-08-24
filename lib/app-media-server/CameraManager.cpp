@@ -2,6 +2,9 @@
 
 #include <iostream>
 
+CameraManager::CameraManager(H264RelayHub* relay_hub)
+    : relay_hub_(relay_hub) {}
+
 CameraManager::~CameraManager() {
     stop_all();
 }
@@ -37,7 +40,8 @@ bool CameraManager::add_camera(const CameraConfig& config) {
         config.rtsp_uri,
         config.record_pattern,
         config.split_seconds,
-        &segment_store_
+        &segment_store_,
+        relay_hub_
     );
 
     CameraWorker* added_worker = nullptr;

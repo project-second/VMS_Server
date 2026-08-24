@@ -15,14 +15,16 @@ CameraWorker::CameraWorker(
     std::string rtsp_uri,
     std::string record_pattern,
     int split_seconds,
-    RecordingSegmentStore* segment_store
+    RecordingSegmentStore* segment_store,
+    H264RelayHub* relay_hub
 )
     : profile_id_(profile_id),
       camera_id_(std::move(camera_id)),
       rtsp_uri_(std::move(rtsp_uri)),
       record_pattern_(std::move(record_pattern)),
       split_seconds_(split_seconds),
-      segment_store_(segment_store) {}
+      segment_store_(segment_store),
+      relay_hub_(relay_hub) {}
 
 CameraWorker::~CameraWorker() {
     stop();
@@ -83,7 +85,8 @@ void CameraWorker::run() {
             rtsp_uri_,
             attempt_pattern.string(),
             split_seconds_,
-            segment_store_
+            segment_store_,
+            relay_hub_
         );
 
         // 3. 파이프라인 생성

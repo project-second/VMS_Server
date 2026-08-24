@@ -3,6 +3,7 @@
 #include "ApplicationConfigLoader.h"
 #include "CameraManager.h"
 #include "DbRuntime.hpp"
+#include "H264RelayHub.h"
 #include "HttpServer.h"
 #include "OnvifDeviceProvisioningService.h"
 #include "RtspRelayServer.h"
@@ -93,7 +94,10 @@ int VmsApplication::run(int argc, char const* argv[]) {
         std::cerr << "[Playback] failed to mark stale recording segments interrupted" << std::endl;
     }
 
-    CameraManager cameraManager;
+    H264RelayHub relayHub;
+    CameraManager cameraManager(
+        config.mediaRtspRelayEnabled ? &relayHub : nullptr
+    );
     cameraManager.segment_store().set_change_callback(
         [&playbackService](const RecordingSegment& segment) {
             if (!playbackService.persistRecordingSegment(segment)) {
@@ -102,6 +106,7 @@ int VmsApplication::run(int argc, char const* argv[]) {
             }
         });
     RtspRelayServer relayServer(
+        relayHub,
         std::to_string(config.mediaRtspRelayPort),
         config.mediaRtspRelayBindAddress,
         config.mediaRtspRelayAdvertisedHost,

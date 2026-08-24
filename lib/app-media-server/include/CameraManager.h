@@ -9,6 +9,8 @@
 #include <string>
 #include <vector>
 
+class H264RelayHub;
+
 // GStreamer 녹화 엔진이 카메라 1대를 실행하기 위해 필요한 최소 설정이다.
 //
 // 주의:
@@ -25,7 +27,7 @@ struct CameraConfig {
 
 class CameraManager {
 public:
-    CameraManager() = default;
+    explicit CameraManager(H264RelayHub* relay_hub = nullptr);
     ~CameraManager();
 
     CameraManager(const CameraManager&) = delete;
@@ -61,4 +63,5 @@ private:
     std::vector<std::unique_ptr<CameraWorker>> workers_;
 
     RecordingSegmentStore segment_store_;
+    H264RelayHub* relay_hub_ = nullptr;
 };

@@ -1,21 +1,30 @@
 #include "RtspRelayServer.h"
 
+#include "H264RelayHub.h"
+
 #include <glib.h>
 
 #include <iostream>
-#include <sstream>
 #include <utility>
 
 namespace {
 
-// media-configure 콜백과 prepared/unprepared 콜백에서 함께 사용할 로그용 context다.
-// factory의 signal data로 붙이며 factory가 해제될 때 함께 delete된다.
 struct RelayFactoryLogContext {
+    H264RelayHub* relay_hub = nullptr;
     std::string camera_id;
     std::string mount_path;
-    std::string input_uri;
     std::string output_url;
 };
+
+struct RelayMediaContext {
+    H264RelayHub* relay_hub = nullptr;
+    std::string camera_id;
+    std::string mount_path;
+    GstAppSrc* appsrc = nullptr;
+    bool attached = false;
+};
+
+constexpr const char* kRelayMediaContextKey = "vms-h264-relay-media-context";
 
 void destroy_relay_factory_log_context(
     gpointer data,
@@ -28,8 +37,46 @@ const char* bool_to_text(gboolean value) {
     return value ? "true" : "false";
 }
 
+void attach_relay_media_context(RelayMediaContext* context) {
+    if (context == nullptr || context->attached ||
+        context->relay_hub == nullptr || context->appsrc == nullptr) {
+        return;
+    }
+
+    context->relay_hub->attach_appsrc(context->camera_id, context->appsrc);
+    context->attached = true;
+}
+
+void detach_relay_media_context(RelayMediaContext* context) {
+    if (context == nullptr || !context->attached ||
+        context->relay_hub == nullptr || context->appsrc == nullptr) {
+        return;
+    }
+
+    context->relay_hub->detach_appsrc(context->camera_id, context->appsrc);
+    context->attached = false;
+}
+
+void destroy_relay_media_context(gpointer data) {
+    auto* context = static_cast<RelayMediaContext*>(data);
+    if (context == nullptr) {
+        return;
+    }
+
+    detach_relay_media_context(context);
+
+    if (context->appsrc != nullptr) {
+        gst_object_unref(context->appsrc);
+        context->appsrc = nullptr;
+    }
+
+    delete context;
+}
+
 void on_media_prepared(GstRTSPMedia* media, gpointer user_data) {
-    const auto* context = static_cast<const RelayFactoryLogContext*>(user_data);
+    auto* context = static_cast<RelayMediaContext*>(user_data);
+
+    attach_relay_media_context(context);
 
     std::cout << "RtspRelayServer: media prepared" << std::endl;
     std::cout << "  camera_id : " << context->camera_id << std::endl;
@@ -53,7 +100,9 @@ void on_media_prepared(GstRTSPMedia* media, gpointer user_data) {
 }
 
 void on_media_unprepared(GstRTSPMedia* media, gpointer user_data) {
-    const auto* context = static_cast<const RelayFactoryLogContext*>(user_data);
+    auto* context = static_cast<RelayMediaContext*>(user_data);
+
+    detach_relay_media_context(context);
 
     std::cout << "RtspRelayServer: media unprepared" << std::endl;
     std::cout << "  camera_id : " << context->camera_id << std::endl;
@@ -71,25 +120,72 @@ void on_media_configure(
     std::cout << "RtspRelayServer: media-configure" << std::endl;
     std::cout << "  camera_id : " << context->camera_id << std::endl;
     std::cout << "  mount     : " << context->mount_path << std::endl;
-    std::cout << "  input     : " << context->input_uri << std::endl;
+    std::cout << "  input     : CameraPipeline encoded H264 bridge" << std::endl;
     std::cout << "  output    : " << context->output_url << std::endl;
     std::cout << "  media ptr : " << media << std::endl;
     std::cout << "  shared    : " << bool_to_text(gst_rtsp_media_is_shared(media)) << std::endl;
 
-    // 같은 media ptr이 재사용되는지 확인하기 위해 prepared/unprepared 시점도 로그로 남긴다.
-    // context는 factory signal data로 유지되므로 여기서는 별도 destroy notify를 주지 않는다.
-    g_signal_connect(media, "prepared", G_CALLBACK(on_media_prepared), context);
-    g_signal_connect(media, "unprepared", G_CALLBACK(on_media_unprepared), context);
+    GstElement* media_element = gst_rtsp_media_get_element(media);
+    if (media_element == nullptr || !GST_IS_BIN(media_element)) {
+        std::cerr << "RtspRelayServer: media pipeline is not a GstBin. camera_id="
+                  << context->camera_id
+                  << std::endl;
+
+        if (media_element != nullptr) {
+            gst_object_unref(media_element);
+        }
+        return;
+    }
+
+    GstElement* appsrc_element = gst_bin_get_by_name(
+        GST_BIN(media_element),
+        "relay-source"
+    );
+    gst_object_unref(media_element);
+
+    if (appsrc_element == nullptr || !GST_IS_APP_SRC(appsrc_element)) {
+        std::cerr << "RtspRelayServer: relay-source appsrc not found. camera_id="
+                  << context->camera_id
+                  << std::endl;
+
+        if (appsrc_element != nullptr) {
+            gst_object_unref(appsrc_element);
+        }
+        return;
+    }
+
+    auto* media_context = new RelayMediaContext{
+        context->relay_hub,
+        context->camera_id,
+        context->mount_path,
+        GST_APP_SRC(appsrc_element),
+        false
+    };
+
+    g_object_set_data_full(
+        G_OBJECT(media),
+        kRelayMediaContextKey,
+        media_context,
+        destroy_relay_media_context
+    );
+
+    // prepare에는 live appsrc data가 필요할 수 있으므로 configure 시점에 연결한다.
+    attach_relay_media_context(media_context);
+
+    g_signal_connect(media, "prepared", G_CALLBACK(on_media_prepared), media_context);
+    g_signal_connect(media, "unprepared", G_CALLBACK(on_media_unprepared), media_context);
 }
 
 } // namespace
 
 RtspRelayServer::RtspRelayServer(
+    H264RelayHub& relay_hub,
     std::string service,
     std::string bind_address,
     std::string advertised_host,
     bool enabled)
-    : service_(std::move(service)),
+    : relay_hub_(relay_hub),
+      service_(std::move(service)),
       bind_address_(std::move(bind_address)),
       advertised_host_(std::move(advertised_host)),
       enabled_(enabled) {}
@@ -110,25 +206,17 @@ bool RtspRelayServer::add_h264_camera(const CameraConfig& config) {
         return false;
     }
 
-    if (config.rtsp_uri.empty()) {
-        std::cerr << "RtspRelayServer: rtsp_uri is empty. camera_id="
-                  << config.camera_id
-                  << std::endl;
-        return false;
-    }
-
     if (!ensure_server_created_locked()) {
         return false;
     }
 
-    const auto mounted = mounted_sources_.find(config.camera_id);
-    if (mounted != mounted_sources_.end() && mounted->second == config.rtsp_uri) {
+    if (mounted_camera_ids_.find(config.camera_id) != mounted_camera_ids_.end()) {
         return true;
     }
 
     const std::string mount_path = make_mount_path(config.camera_id);
     const std::string output_url = make_public_url(config.camera_id);
-    const std::string launch = make_h264_relay_launch(config.rtsp_uri);
+    const std::string launch = make_h264_relay_launch();
 
     GstRTSPMountPoints* mounts = gst_rtsp_server_get_mount_points(server_);
     if (mounts == nullptr) {
@@ -151,9 +239,9 @@ bool RtspRelayServer::add_h264_camera(const CameraConfig& config) {
 
     // RTSP media 생성/준비/해제 시점을 확인하기 위한 로그 콜백을 연결한다.
     auto* context = new RelayFactoryLogContext{
+        &relay_hub_,
         config.camera_id,
         mount_path,
-        config.rtsp_uri,
         output_url
     };
 
@@ -170,11 +258,11 @@ bool RtspRelayServer::add_h264_camera(const CameraConfig& config) {
     gst_rtsp_mount_points_add_factory(mounts, mount_path.c_str(), factory);
     g_object_unref(mounts);
 
-    mounted_sources_[config.camera_id] = config.rtsp_uri;
+    mounted_camera_ids_.insert(config.camera_id);
 
     std::cout << "RtspRelayServer: added H264 relay" << std::endl;
     std::cout << "  camera_id: " << config.camera_id << std::endl;
-    std::cout << "  input    : " << config.rtsp_uri << std::endl;
+    std::cout << "  input    : CameraPipeline encoded H264 bridge" << std::endl;
     std::cout << "  output   : " << output_url << std::endl;
     std::cout << "  shared   : true" << std::endl;
     std::cout << "  launch   : " << launch << std::endl;
@@ -225,8 +313,8 @@ bool RtspRelayServer::start() {
     });
 
     std::cout << "RtspRelayServer started" << std::endl;
-    for (const auto& mounted : mounted_sources_) {
-        std::cout << "  " << make_public_url(mounted.first) << std::endl;
+    for (const auto& camera_id : mounted_camera_ids_) {
+        std::cout << "  " << make_public_url(camera_id) << std::endl;
     }
 
     return true;
@@ -266,7 +354,7 @@ void RtspRelayServer::stop() {
         server_ = nullptr;
     }
 
-    mounted_sources_.clear();
+    mounted_camera_ids_.clear();
     running_ = false;
 
     std::cout << "RtspRelayServer stopped" << std::endl;
@@ -303,40 +391,16 @@ bool RtspRelayServer::ensure_server_created_locked() {
     return true;
 }
 
-std::string RtspRelayServer::make_h264_relay_launch(const std::string& rtsp_uri) const {
-    // 27강 기준 H264 RTSP relay 파이프라인.
-    //
-    // rtspsrc로 카메라 RTSP를 받고,
-    // H264 RTP를 depay/parse한 뒤,
-    // 다시 rtph264pay로 감싸 RTSP server가 클라이언트에게 내보낸다.
-    //
-    // decode/re-encode를 하지 않으므로 CPU 부하가 낮다.
-    std::ostringstream oss;
-
-    oss << "( "
-        << "rtspsrc location=" << quote_for_gst_launch(rtsp_uri)
-        << " latency=100 protocols=tcp "
-        << "! rtph264depay "
-        << "! h264parse config-interval=1 "
-        << "! rtph264pay name=pay0 pt=96 "
-        << ")";
-
-    return oss.str();
-}
-
-std::string RtspRelayServer::quote_for_gst_launch(const std::string& value) const {
-    std::string result;
-    result.reserve(value.size() + 2);
-
-    result.push_back('"');
-
-    for (char ch : value) {
-        if (ch == '\\' || ch == '"') {
-            result.push_back('\\');
-        }
-        result.push_back(ch);
-    }
-
-    result.push_back('"');
-    return result;
+std::string RtspRelayServer::make_h264_relay_launch() const {
+    // CameraPipeline의 encoded H264 appsink buffer를 appsrc로 받아 RTP packetize한다.
+    // 두 GstPipeline은 분리되어 있지만 decode/re-encode는 하지 않는다.
+    return
+        "( "
+        "appsrc name=relay-source is-live=true format=time "
+        "do-timestamp=true block=false "
+        "! queue max-size-buffers=60 max-size-bytes=0 "
+        "max-size-time=0 leaky=downstream "
+        "! h264parse config-interval=-1 "
+        "! rtph264pay name=pay0 pt=96 config-interval=1 "
+        ")";
 }

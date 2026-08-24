@@ -9,6 +9,8 @@
 
 #include "RecordingSegmentStore.h"
 
+class H264RelayHub;
+
 enum class CameraPipelineEvent {
     None,
     Error,
@@ -24,8 +26,7 @@ private:
     int split_seconds_ = 5;
 
     RecordingSegmentStore* segment_store_ = nullptr;
-
-    int frame_count_ = 0;
+    H264RelayHub* relay_hub_ = nullptr;
 
     GstElement* pipeline_ = nullptr;
 
@@ -37,18 +38,14 @@ private:
     GstElement* record_queue_ = nullptr;
     GstElement* split_sink_ = nullptr;
 
-    GstElement* app_queue_ = nullptr;
-    GstElement* decoder_ = nullptr;
-    GstElement* converter_ = nullptr;
-    GstElement* videoscale_ = nullptr;
-    GstElement* capsfilter_ = nullptr;
-    GstElement* app_sink_ = nullptr;
+    GstElement* relay_queue_ = nullptr;
+    GstElement* relay_sink_ = nullptr;
 
     GstPad* tee_record_pad_ = nullptr;
-    GstPad* tee_app_pad_ = nullptr;
+    GstPad* tee_relay_pad_ = nullptr;
 
     GstPad* record_queue_sink_pad_ = nullptr;
-    GstPad* app_queue_sink_pad_ = nullptr;
+    GstPad* relay_queue_sink_pad_ = nullptr;
 
 public:
     CameraPipeline(
@@ -57,7 +54,8 @@ public:
         std::string rtsp_uri,
         std::string record_pattern,
         int split_seconds,
-        RecordingSegmentStore* segment_store
+        RecordingSegmentStore* segment_store,
+        H264RelayHub* relay_hub
     );
 
     ~CameraPipeline();
