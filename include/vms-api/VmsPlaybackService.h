@@ -58,6 +58,7 @@ private:
     struct AuthorizedHlsSession {
         HlsVodSession session;
         std::string accessToken;
+        std::chrono::steady_clock::time_point lastAccessAt;
     };
 
     static std::string createAccessToken();

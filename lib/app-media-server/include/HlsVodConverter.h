@@ -47,12 +47,12 @@ struct HlsVodConvertAllResult {
 //
 // 37강 범위:
 // - HlsVodSession의 모든 segment plan을 순차 변환
-// - source_offset_ms부터 requested_duration_ms만큼 TS로 remux
-// - decode/re-encode 하지 않음
+// - source_offset_ms부터 requested_duration_ms만큼 TS로 변환
+// - 녹화 조각 중간에서 시작하는 첫 구간은 정확 절단을 위해 decode/re-encode
+// - 조각 시작점부터 변환하는 나머지 구간은 기존처럼 빠르게 remux
 //
 // 주의:
-// - GST_SEEK_FLAG_KEY_UNIT을 사용하므로 실제 시작점은 요청 시각보다
-//   약간 앞의 keyframe이 될 수 있다.
+// - 정확 절단 경로는 avdec_h264, videoconvert, x264enc가 필요하다.
 // - H264 이외 codec은 아직 처리하지 않는다.
 class HlsVodConverter {
 public:

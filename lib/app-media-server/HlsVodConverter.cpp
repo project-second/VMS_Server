@@ -202,6 +202,7 @@ bool wait_until_paused(
 bool apply_trim_seek(
     GstElement* pipeline,
     const HlsVodSegment& segment,
+    bool exact_start_trim,
     std::string& error_message
 ) {
     const auto start_ns = milliseconds_to_nanoseconds(segment.source_offset_ms);
@@ -214,12 +215,12 @@ bool apply_trim_seek(
         return false;
     }
 
-    // 1. Key-unit seek를 사용한다.
-    //    H264/H265는 임의 프레임에서 바로 디코딩을 시작하기 어렵기 때문에
-    //    실제 시작점은 요청 offset보다 약간 앞의 keyframe이 될 수 있다.
+    // 녹화 조각 중간에서 시작할 때는 decode/re-encode 경로가 앞쪽 keyframe을
+    // 디코딩에만 사용하고, 요청 시각 이전 frame은 버릴 수 있도록 정확 seek한다.
+    // 조각 시작점부터 변환할 때는 기존의 빠른 remux/key-unit 경로를 유지한다.
     const auto seek_flags = static_cast<GstSeekFlags>(
         GST_SEEK_FLAG_FLUSH |
-        GST_SEEK_FLAG_KEY_UNIT
+        (exact_start_trim ? GST_SEEK_FLAG_ACCURATE : GST_SEEK_FLAG_KEY_UNIT)
     );
 
     const gboolean seek_ok = gst_element_seek(
@@ -374,7 +375,7 @@ HlsVodConvertResult HlsVodConverter::validate_segment(
     result.source_offset_ms = segment.source_offset_ms;
     result.requested_duration_ms = segment.duration_ms;
     result.requested_stop_ms = segment.source_offset_ms + segment.duration_ms;
-    result.key_unit_seek = true;
+    result.key_unit_seek = (segment.source_offset_ms == 0);
 
     if (segment.source_file_path.empty()) {
         result.ok = false;
@@ -445,23 +446,45 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
         }
     }
 
+    // 녹화 조각 중간에서 시작하는 첫 구간만 정확 절단 경로를 사용한다.
+    // 나머지 조각은 기존처럼 decode/re-encode 없는 빠른 remux를 유지한다.
+    const bool exact_start_trim = segment.source_offset_ms > 0;
+
     // 4. GStreamer element 생성
     GstElement* pipeline = gst_pipeline_new("hls-vod-mp4-to-ts-trim-pipeline");
     GstElement* filesrc = gst_element_factory_make("filesrc", "source");
     GstElement* demux = gst_element_factory_make("qtdemux", "demux");
     GstElement* queue = gst_element_factory_make("queue", "video-queue");
-    GstElement* h264parse = gst_element_factory_make("h264parse", "h264-parser");
+    GstElement* input_h264parse = exact_start_trim
+        ? gst_element_factory_make("h264parse", "h264-input-parser")
+        : nullptr;
+    GstElement* decoder = exact_start_trim
+        ? gst_element_factory_make("avdec_h264", "h264-decoder")
+        : nullptr;
+    GstElement* videoconvert = exact_start_trim
+        ? gst_element_factory_make("videoconvert", "video-converter")
+        : nullptr;
+    GstElement* encoder = exact_start_trim
+        ? gst_element_factory_make("x264enc", "h264-encoder")
+        : nullptr;
+    GstElement* h264parse = gst_element_factory_make("h264parse", "h264-output-parser");
     GstElement* capsfilter = gst_element_factory_make("capsfilter", "h264-capsfilter");
     GstElement* mux = gst_element_factory_make("mpegtsmux", "ts-muxer");
     GstElement* filesink = gst_element_factory_make("filesink", "sink");
 
     if (pipeline == nullptr || filesrc == nullptr || demux == nullptr ||
         queue == nullptr || h264parse == nullptr || capsfilter == nullptr ||
-        mux == nullptr || filesink == nullptr) {
+        mux == nullptr || filesink == nullptr ||
+        (exact_start_trim && (input_h264parse == nullptr || decoder == nullptr ||
+            videoconvert == nullptr || encoder == nullptr))) {
         unref_object(GST_OBJECT(pipeline));
         unref_object(GST_OBJECT(filesrc));
         unref_object(GST_OBJECT(demux));
         unref_object(GST_OBJECT(queue));
+        unref_object(GST_OBJECT(input_h264parse));
+        unref_object(GST_OBJECT(decoder));
+        unref_object(GST_OBJECT(videoconvert));
+        unref_object(GST_OBJECT(encoder));
         unref_object(GST_OBJECT(h264parse));
         unref_object(GST_OBJECT(capsfilter));
         unref_object(GST_OBJECT(mux));
@@ -471,7 +494,8 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
         result.ok = false;
         result.error_message =
             "failed to create one or more GStreamer elements. "
-            "Required elements: filesrc, qtdemux, queue, h264parse, capsfilter, mpegtsmux, filesink";
+            "Required elements: filesrc, qtdemux, queue, h264parse, capsfilter, "
+            "mpegtsmux, filesink; exact trim also requires avdec_h264, videoconvert, x264enc";
         return result;
     }
 
@@ -482,6 +506,17 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
 
     // MPEG-TS 안의 H264는 byte-stream/AU 정렬 형태가 다루기 쉽다.
     g_object_set(h264parse, "config-interval", -1, nullptr);
+    if (exact_start_trim) {
+        // 짧은 첫 구간을 빠르게 다시 인코딩하고, 첫 출력 frame을 IDR로 시작한다.
+        gst_util_set_object_arg(G_OBJECT(encoder), "speed-preset", "veryfast");
+        gst_util_set_object_arg(G_OBJECT(encoder), "tune", "zerolatency");
+        g_object_set(
+            encoder,
+            "byte-stream", TRUE,
+            "key-int-max", 30u,
+            nullptr
+        );
+    }
 
     GstCaps* h264_caps = gst_caps_from_string(
         "video/x-h264,stream-format=byte-stream,alignment=au"
@@ -489,17 +524,35 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
     g_object_set(capsfilter, "caps", h264_caps, nullptr);
     gst_caps_unref(h264_caps);
 
-    gst_bin_add_many(
-        GST_BIN(pipeline),
-        filesrc,
-        demux,
-        queue,
-        h264parse,
-        capsfilter,
-        mux,
-        filesink,
-        nullptr
-    );
+    if (exact_start_trim) {
+        gst_bin_add_many(
+            GST_BIN(pipeline),
+            filesrc,
+            demux,
+            queue,
+            input_h264parse,
+            decoder,
+            videoconvert,
+            encoder,
+            h264parse,
+            capsfilter,
+            mux,
+            filesink,
+            nullptr
+        );
+    } else {
+        gst_bin_add_many(
+            GST_BIN(pipeline),
+            filesrc,
+            demux,
+            queue,
+            h264parse,
+            capsfilter,
+            mux,
+            filesink,
+            nullptr
+        );
+    }
 
     if (!gst_element_link(filesrc, demux)) {
         gst_object_unref(pipeline);
@@ -510,12 +563,33 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
         return result;
     }
 
-    if (!gst_element_link_many(queue, h264parse, capsfilter, mux, filesink, nullptr)) {
+    const bool output_linked = exact_start_trim
+        ? gst_element_link_many(
+            queue,
+            input_h264parse,
+            decoder,
+            videoconvert,
+            encoder,
+            h264parse,
+            capsfilter,
+            mux,
+            filesink,
+            nullptr)
+        : gst_element_link_many(
+            queue,
+            h264parse,
+            capsfilter,
+            mux,
+            filesink,
+            nullptr);
+    if (!output_linked) {
         gst_object_unref(pipeline);
 
         HlsVodConvertResult result = validation;
         result.ok = false;
-        result.error_message = "failed to link queue -> h264parse -> capsfilter -> mpegtsmux -> filesink";
+        result.error_message = exact_start_trim
+            ? "failed to link exact trim decode/re-encode pipeline"
+            : "failed to link remux pipeline";
         return result;
     }
 
@@ -539,7 +613,7 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
         return result;
     }
 
-    if (!apply_trim_seek(pipeline, segment, error_message)) {
+    if (!apply_trim_seek(pipeline, segment, exact_start_trim, error_message)) {
         gst_element_set_state(pipeline, GST_STATE_NULL);
         gst_object_unref(bus);
         gst_object_unref(pipeline);
@@ -576,7 +650,7 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
     HlsVodConvertResult result = validation;
     result.ok = true;
     result.trim_applied = true;
-    result.key_unit_seek = true;
+    result.key_unit_seek = !exact_start_trim;
     return result;
 }
 

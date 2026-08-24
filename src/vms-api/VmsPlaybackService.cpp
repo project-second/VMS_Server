@@ -157,7 +157,9 @@ PlaybackHlsResult VmsPlaybackService::createHls(
     {
         std::lock_guard<std::mutex> lock(sessionsMutex_);
         sessions_[hls.session->session_id] = AuthorizedHlsSession{
-            *hls.session, std::move(accessToken)};
+            *hls.session,
+            std::move(accessToken),
+            std::chrono::steady_clock::now()};
     }
     result.ok = true;
     result.sessionId = hls.session->session_id;
@@ -205,6 +207,9 @@ PlaybackBinaryResult VmsPlaybackService::readHlsSegment(
         if (segment == it->second.session.segments.end()) {
             return {false, false, "HLS segment not found", {}};
         }
+        // 재생 중인 세션은 마지막으로 유효한 segment를 요청한 시점부터
+        // TTL을 다시 계산해 긴 VOD도 중간에 만료되지 않게 한다.
+        it->second.lastAccessAt = std::chrono::steady_clock::now();
         path = segment->output_file_path;
     }
     std::ifstream input(path, std::ios::binary);
@@ -217,10 +222,10 @@ PlaybackBinaryResult VmsPlaybackService::readHlsSegment(
 }
 
 void VmsPlaybackService::cleanupExpiredSessions() {
-    const auto threshold = std::chrono::system_clock::now() - sessionTtl_;
+    const auto threshold = std::chrono::steady_clock::now() - sessionTtl_;
     std::lock_guard<std::mutex> lock(sessionsMutex_);
     for (auto it = sessions_.begin(); it != sessions_.end();) {
-        if (it->second.session.created_at < threshold) {
+        if (it->second.lastAccessAt < threshold) {
             std::error_code error;
             std::filesystem::remove_all(it->second.session.cache_dir, error);
             it = sessions_.erase(it);
