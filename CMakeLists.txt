@@ -24,6 +24,7 @@ add_executable(${PROJECT_NAME} ${SOURCES})
 
 target_include_directories(${PROJECT_NAME} PRIVATE
     ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/include/app
     ${CMAKE_SOURCE_DIR}/include/vms-api
     ${CMAKE_SOURCE_DIR}/include/onvif-manager
     ${CMAKE_SOURCE_DIR}/include/media
