@@ -148,6 +148,17 @@ PlaybackHlsResult VmsPlaybackService::createHls(
     }
     auto converted = converter_.convert_all_segments(*hls.session);
     if (!converted.ok) {
+        for (const auto& segment : converted.segment_results) {
+            if (!segment.ok) {
+                LogSync::error("[Playback] HLS conversion failed: session=", converted.session_id,
+                    " segment=", segment.sequence_no,
+                    " source=", segment.source_file_path.string(),
+                    " output=", segment.output_file_path.string(),
+                    " offset_ms=", segment.source_offset_ms,
+                    " duration_ms=", segment.requested_duration_ms,
+                    " error=", segment.error_message);
+            }
+        }
         result.errorMessage = converted.error_message;
         return result;
     }

@@ -359,6 +359,15 @@ HlsVodConvertAllResult HlsVodConverter::convert_all_segments(
             << " of "
             << result.requested_count
             << " HLS segments";
+        for (const auto& segment_result : result.segment_results) {
+            if (!segment_result.ok) {
+                oss << "; first failed segment " << segment_result.sequence_no
+                    << " (offset_ms=" << segment_result.source_offset_ms
+                    << ", duration_ms=" << segment_result.requested_duration_ms
+                    << "): " << segment_result.error_message;
+                break;
+            }
+        }
         result.error_message = oss.str();
     }
 
@@ -477,6 +486,28 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
         mux == nullptr || filesink == nullptr ||
         (exact_start_trim && (input_h264parse == nullptr || decoder == nullptr ||
             videoconvert == nullptr || encoder == nullptr))) {
+        std::ostringstream missing_elements;
+        const auto note_missing = [&missing_elements](const char* name, GstElement* element) {
+            if (element == nullptr) {
+                if (missing_elements.tellp() > 0) missing_elements << ", ";
+                missing_elements << name;
+            }
+        };
+        note_missing("pipeline", pipeline);
+        note_missing("filesrc", filesrc);
+        note_missing("qtdemux", demux);
+        note_missing("queue", queue);
+        note_missing("h264parse", h264parse);
+        note_missing("capsfilter", capsfilter);
+        note_missing("mpegtsmux", mux);
+        note_missing("filesink", filesink);
+        if (exact_start_trim) {
+            note_missing("h264parse (input)", input_h264parse);
+            note_missing("avdec_h264", decoder);
+            note_missing("videoconvert", videoconvert);
+            note_missing("x264enc", encoder);
+        }
+
         unref_object(GST_OBJECT(pipeline));
         unref_object(GST_OBJECT(filesrc));
         unref_object(GST_OBJECT(demux));
@@ -492,10 +523,7 @@ HlsVodConvertResult HlsVodConverter::convert_segment_to_ts(
 
         HlsVodConvertResult result = validation;
         result.ok = false;
-        result.error_message =
-            "failed to create one or more GStreamer elements. "
-            "Required elements: filesrc, qtdemux, queue, h264parse, capsfilter, "
-            "mpegtsmux, filesink; exact trim also requires avdec_h264, videoconvert, x264enc";
+        result.error_message = "failed to create GStreamer elements: " + missing_elements.str();
         return result;
     }
 

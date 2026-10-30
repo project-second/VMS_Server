@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-project(vms_server VERSION 0.1.0 LANGUAGES CXX)
+project(vms_server VERSION 0.1.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -129,6 +129,7 @@ set(VMS_GSTREAMER_PLUGIN_FILES
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstmultifile.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstlibav.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstvideoconvertscale.so
+    ${VMS_GSTREAMER_PLUGIN_DIR}/libgstx264.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstcoreelements.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstapp.so
     ${VMS_GSTREAMER_PLUGIN_DIR}/libgstisomp4.so
@@ -160,6 +161,7 @@ install(CODE [[
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstmultifile.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstlibav.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstvideoconvertscale.so"
+        "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstx264.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstcoreelements.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstapp.so"
         "/usr/lib/x86_64-linux-gnu/gstreamer-1.0/libgstisomp4.so"
