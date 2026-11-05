@@ -147,9 +147,21 @@ PlaybackHlsResult VmsPlaybackService::createHls(
         return result;
     }
     auto converted = converter_.convert_all_segments(*hls.session);
+    // DB 시각과 실제 파일 길이 차이로 겹침이 없는 조각은 녹화 공백으로 처리한다.
+    // 디코딩·파일·플러그인 오류는 기존처럼 요청 전체를 실패시킨다.
+    for (const auto& segment : converted.segment_results) {
+        if (segment.no_video_in_range) {
+            LogSync::error("[Playback] HLS recording gap: session=", converted.session_id,
+                " segment=", segment.sequence_no,
+                " source=", segment.source_file_path.string(),
+                " offset_ms=", segment.source_offset_ms,
+                " duration_ms=", segment.requested_duration_ms,
+                " reason=", segment.error_message);
+        }
+    }
     if (!converted.ok) {
         for (const auto& segment : converted.segment_results) {
-            if (!segment.ok) {
+            if (!segment.ok && !segment.no_video_in_range) {
                 LogSync::error("[Playback] HLS conversion failed: session=", converted.session_id,
                     " segment=", segment.sequence_no,
                     " source=", segment.source_file_path.string(),
@@ -159,10 +171,28 @@ PlaybackHlsResult VmsPlaybackService::createHls(
                     " error=", segment.error_message);
             }
         }
+        result.notFound = converted.failure_count == 0 && converted.success_count == 0;
         result.errorMessage = converted.error_message;
         return result;
     }
-    auto playlist = playlistBuilder_.write_playlist(*hls.session);
+    std::vector<HlsVodSegment> playableSegments;
+    std::vector<bool> discontinuities;
+    std::string previousConfiguration;
+    hls.session->total_duration_ms = 0;
+    for (std::size_t index = 0; index < converted.segment_results.size(); ++index) {
+        if (converted.segment_results[index].ok) {
+            auto segment = hls.session->segments[index];
+            segment.duration_ms = converted.segment_results[index].output_duration_ms;
+            const auto& configuration = converted.segment_results[index].codec_configuration;
+            discontinuities.push_back(!playableSegments.empty() &&
+                (configuration.empty() || previousConfiguration.empty() || configuration != previousConfiguration));
+            previousConfiguration = configuration;
+            hls.session->total_duration_ms += segment.duration_ms;
+            playableSegments.push_back(std::move(segment));
+        }
+    }
+    hls.session->segments = std::move(playableSegments);
+    auto playlist = playlistBuilder_.write_playlist(*hls.session, discontinuities);
     if (!playlist.ok) {
         result.errorMessage = playlist.error_message;
         return result;

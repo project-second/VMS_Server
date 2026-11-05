@@ -19,6 +19,7 @@ struct HlsVodPlaylistWriteResult {
 // - index.m3u8 생성
 // - #EXTM3U, #EXT-X-PLAYLIST-TYPE:VOD, #EXTINF 작성
 // - #EXT-X-PROGRAM-DATE-TIME으로 CCTV 절대시간 매핑
+// - 인코딩 설정 변경 경계에 #EXT-X-DISCONTINUITY 작성
 //
 // 아직 하지 않는 것:
 // - seg_000.ts 실제 생성
@@ -28,6 +29,9 @@ class HlsVodPlaylistBuilder {
 public:
     HlsVodPlaylistWriteResult write_playlist(
         const HlsVodSession& session
+    ) const;
+    HlsVodPlaylistWriteResult write_playlist(
+        const HlsVodSession& session, const std::vector<bool>& discontinuities
     ) const;
 
     static void print_write_result(

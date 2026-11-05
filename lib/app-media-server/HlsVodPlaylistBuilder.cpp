@@ -12,9 +12,20 @@
 HlsVodPlaylistWriteResult HlsVodPlaylistBuilder::write_playlist(
     const HlsVodSession& session
 ) const {
+    return write_playlist(session, std::vector<bool>(session.segments.size(), true));
+}
+
+HlsVodPlaylistWriteResult HlsVodPlaylistBuilder::write_playlist(
+    const HlsVodSession& session, const std::vector<bool>& discontinuities
+) const {
     // 1. HLS session 검증
     auto validation = validate_session(session);
     if (!validation.ok) {
+        return validation;
+    }
+    if (discontinuities.size() != session.segments.size()) {
+        validation.ok = false;
+        validation.error_message = "HLS discontinuity count does not match segment count";
         return validation;
     }
 
@@ -47,7 +58,13 @@ HlsVodPlaylistWriteResult HlsVodPlaylistBuilder::write_playlist(
     out << "#EXT-X-TARGETDURATION:" << target_duration_seconds << "\n";
     out << "#EXT-X-MEDIA-SEQUENCE:0\n";
 
-    for (const auto& segment : session.segments) {
+    for (std::size_t index = 0; index < session.segments.size(); ++index) {
+        const auto& segment = session.segments[index];
+        // 세션 변환은 TS 시각·counter를 이어 붙이고, 인코딩 설정 변경만 표시한다.
+        if (index > 0 && discontinuities[index]) {
+            out << "#EXT-X-DISCONTINUITY\n";
+        }
+
         out << "#EXT-X-PROGRAM-DATE-TIME:"
             << format_program_date_time_utc(segment.program_date_time)
             << "\n";

@@ -60,5 +60,6 @@ void configurePackagedGStreamerEnvironment(const VmsRuntimePaths& paths) {
     // 패키지에 스캐너 실행 파일이 있으면 플러그인 검사에 해당 파일을 사용하도록 지정한다.
     if (std::filesystem::exists(scannerPath)) {
         setenv("GST_PLUGIN_SCANNER", scannerPath.c_str(), 1);
+        setenv("GST_PLUGIN_SCANNER_1_0", scannerPath.c_str(), 1);
     }
 }
